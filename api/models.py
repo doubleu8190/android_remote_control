@@ -1,0 +1,193 @@
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from datetime import datetime
+from typing import List, Optional, Dict, Any
+from enum import Enum
+import uuid
+import re
+
+# ==================== 枚举类型 ====================
+
+class MessageRole(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+class MessageStatus(str, Enum):
+    SENDING = "sending"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    READ = "read"
+    ERROR = "error"
+
+# ==================== 请求/响应模型 ====================
+
+class UserBase(BaseModel):
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+
+class UserCreate(UserBase):
+    password: str
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not v or len(v.strip()) < 3:
+            raise ValueError('用户名至少需要3个字符')
+        if len(v) > 50:
+            raise ValueError('用户名不能超过50个字符')
+        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+            raise ValueError('用户名只能包含字母、数字、下划线和连字符')
+        return v.strip().lower()
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == '':
+            return None
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, v):
+            raise ValueError('无效的邮箱格式')
+        return v.strip().lower()
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError('密码至少需要8个字符')
+        if len(v) > 128:
+            raise ValueError('密码不能超过128个字符')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('密码必须包含至少一个大写字母')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('密码必须包含至少一个小写字母')
+        if not re.search(r'\d', v):
+            raise ValueError('密码必须包含至少一个数字')
+        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
+            raise ValueError('密码必须包含至少一个特殊字符')
+        return v
+
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == '':
+            return None
+        if len(v) > 100:
+            raise ValueError('姓名不能超过100个字符')
+        return v.strip()
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class UserResponse(UserBase):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: Optional[int] = None
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+    user_id: Optional[str] = None
+
+# ==================== 消息模型 ====================
+
+class MessageBase(BaseModel):
+    content: str
+    role: MessageRole = MessageRole.USER
+    status: MessageStatus = MessageStatus.SENT
+    metadata: Optional[Dict[str, Any]] = None
+
+class MessageCreate(MessageBase):
+    pass
+
+class MessageResponse(MessageBase):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = Field(default_factory=datetime.now)
+    session_id: str
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# ==================== 会话模型 ====================
+
+class SessionBase(BaseModel):
+    title: str = "New Chat"
+    metadata: Optional[Dict[str, Any]] = None
+
+class SessionCreate(SessionBase):
+    pass
+
+class SessionResponse(SessionBase):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    messages: List[MessageResponse] = []
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class SessionUpdate(BaseModel):
+    title: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+# ==================== 聊天请求/响应 ====================
+
+class SendMessageRequest(BaseModel):
+    message: str
+    stream: bool = False
+    session_id: Optional[str] = None  # 如果为空，创建新会话
+
+class SendMessageResponse(BaseModel):
+    message_id: str
+    content: str
+    role: MessageRole
+    timestamp: datetime
+    session_id: str
+    stream: bool = False
+
+class StreamChunk(BaseModel):
+    type: str  # 'text', 'tool_call', 'tool_result', 'error', 'done'
+    data: str
+    message_id: Optional[str] = None
+
+class ChatResponse(BaseModel):
+    success: bool = True
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+# ==================== 数据库模型（模拟） ====================
+
+class UserInDB(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    hashed_password: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    is_active: bool = True
+
+class SessionInDB(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    title: str
+    messages: List[Dict[str, Any]] = []  # 存储消息字典
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    metadata: Optional[Dict[str, Any]] = None
+
+class MessageInDB(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str
+    content: str
+    role: MessageRole = MessageRole.USER
+    status: MessageStatus = MessageStatus.SENT
+    timestamp: datetime = Field(default_factory=datetime.now)
+    metadata: Optional[Dict[str, Any]] = None

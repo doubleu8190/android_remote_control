@@ -1,0 +1,27 @@
+# Web Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.16
+
+# AI/ML
+langchain==1.2.15
+langchain-openai==1.1.13
+langchain-community==0.4.1
+openai==2.32.0
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Utilities
+pydantic==2.12.0
+python-dotenv==1.0.1
+requests==2.32.3
+
+# Database
+sqlalchemy==2.0.38
+alembic==1.15.1
+
+# Development
+pytest==8.3.3
+httpx==0.28.1
