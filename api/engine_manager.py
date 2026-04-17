@@ -1,10 +1,14 @@
 from typing import Dict, Optional, Any
+import os
 import uuid
 from datetime import datetime
 
 from engine.engine import AIEngine, EngineBuilder
-from langchain_openai import OpenAI
+from langchain_openai import ChatOpenAI
 from langchain_community.tools import Tool
+
+# 导入配置加载器
+from config.config_loader import config
 
 # 导入service层（如果存在）
 try:
@@ -33,20 +37,56 @@ class AIEngineWrapper:
             return
         
         try:
-            # 创建LLM实例
-            # 在实际应用中，这里应该从配置或环境变量中获取API密钥
-            self.base_llm = OpenAI(
-                temperature=0.7,
-                max_tokens=1000,
-                model_name="gpt-3.5-turbo"  # 可以根据需要更改模型
-            )
+            # 从配置文件获取LLM配置
+            openai_config = config.get_config("llm.openai", {})
             
+            # 检查API密钥是否是环境变量格式且未设置
+            api_key = openai_config.get("api_key")
+            if isinstance(api_key, str) and api_key.startswith("${") and api_key.endswith("}"):
+                env_var_name = api_key[2:-1]
+                if not os.getenv(env_var_name):
+                    print(f"警告: 环境变量 {env_var_name} 未设置，将使用回退LLM")
+                    print(f"请设置环境变量: export {env_var_name}=your_api_key")
+                    self._create_fallback_llm()
+                    return
+
+                api_key = os.getenv(env_var_name)
+
+            base_url = openai_config.get("base_url")
+            if not base_url or base_url.strip() == "":
+                print(f"警告: base_url 未设置，将使用回退LLM")
+                self._create_fallback_llm()
+                return
+
+            model_name = openai_config.get("model_name")
+            if not model_name or model_name.strip() == "":
+                print(f"警告: model_name 未设置，将使用回退LLM")
+                self._create_fallback_llm()
+                return
+
+            # 创建LLM实例 - 添加专门的异常处理
+            try:
+                self.base_llm = ChatOpenAI(
+                    api_key=api_key,
+                    base_url=base_url,
+                    temperature=openai_config.get("temperature", 0.7),
+                    max_tokens=openai_config.get("max_tokens", 1000),
+                    model=model_name,
+                    timeout=openai_config.get("timeout", 30),
+                    max_retries=openai_config.get("max_retries", 3)
+                )
+            except Exception as e:
+                print(f"ChatOpenAI 初始化失败: {e}")
+                print("将使用回退LLM")
+                self._create_fallback_llm()
+                return
+
             # 创建工具列表
             self.base_tools = self._create_tools()
-            
+
             self.initialized = True
             print(f"AI引擎已为用户 {self.user_id} 初始化基础组件")
-            
+
         except Exception as e:
             print(f"AI引擎初始化失败: {e}")
             # 创建回退LLM
@@ -57,27 +97,14 @@ class AIEngineWrapper:
         tools = []
         
         # 示例工具：计算器
-        def calculator(query: str) -> str:
-            """执行数学计算。输入应为数学表达式，如 '2+2' 或 'sin(30)'"""
-            try:
-                # 简单实现 - 在实际应用中应该使用更安全的评估方法
-                # 这里只是示例
-                if "sin" in query or "cos" in query or "tan" in query:
-                    return "三角函数计算需要更复杂的实现"
-                elif "+" in query or "-" in query or "*" in query or "/" in query:
-                    # 非常简单的评估（仅用于演示）
-                    parts = query.replace(" ", "").split("+")
-                    if len(parts) > 1:
-                        return str(sum(float(p) for p in parts))
-                return f"无法计算: {query}"
-            except Exception as e:
-                return f"计算错误: {e}"
+        def test_tool(query: str) -> str:
+            return f"测试工具: {query}"
         
         tools.append(
             Tool(
-                name="calculator",
-                func=calculator,
-                description="执行数学计算。输入应为数学表达式，如 '2+2' 或 'sin(30)'"
+                name="test_tool",
+                func=test_tool,
+                description="测试工具"
             )
         )
         

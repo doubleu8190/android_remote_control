@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+import os
 import uuid
 import html
 import re
@@ -14,9 +15,9 @@ from .database import get_db
 from .models_db import User
 
 # 安全配置
-SECRET_KEY = "your-secret-key-here-change-in-production"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here-change-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
 # 密码哈希
 pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
@@ -78,10 +79,12 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     """创建访问令牌"""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # 将过期时间转换为整数时间戳（JWT规范要求）
+    expire_timestamp = int(expire.timestamp())
+    to_encode.update({"exp": expire_timestamp})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -97,6 +100,15 @@ async def get_current_user(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        
+        # 显式验证令牌过期时间（时区感知）
+        if 'exp' in payload:
+            # 获取当前UTC时间戳
+            current_timestamp = datetime.now(timezone.utc).timestamp()
+            # JWT exp字段是整数秒数
+            if payload['exp'] < current_timestamp:
+                raise credentials_exception
+        
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception

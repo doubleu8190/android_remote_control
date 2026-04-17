@@ -1,0 +1,90 @@
+# AI Engine 配置文件
+# 管理与引擎管理功能相关的所有配置参数
+# 注意：敏感信息（如API密钥）应通过环境变量设置，格式为 ${环境变量名}
+
+# 基础设置
+base:
+  # 引擎管理设置
+  engine:
+    max_sessions_per_user: 10  # 每个用户的最大会话数
+    session_timeout: 3600  # 会话超时时间（秒）
+    cleanup_interval: 300  # 清理过期会话的间隔时间（秒）
+  
+  # 日志设置
+  logging:
+    level: "INFO"  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
+    file: "logs/engine.log"  # 日志文件路径
+    rotation: "10MB"  # 日志文件轮换大小
+
+# LLM (大语言模型) 配置
+llm:
+  # OpenAI 配置
+  openai:
+    api_key: "${OPENAI_API_KEY}"  # 从环境变量获取API密钥
+    base_url: "https://api.deepseek.com"  # 基础URL
+    model_name: "deepseek-reasoner"  # 模型名称
+    temperature: 0.7  # 温度参数（0-1）
+    max_tokens: 1000  # 最大令牌数
+    timeout: 30  # API请求超时时间（秒）
+    max_retries: 3  # 最大重试次数
+  
+  # 回退LLM配置
+  fallback:
+    enabled: true  # 是否启用回退LLM
+    responses:  # 回退响应
+      - "这是一个示例响应。AI引擎初始化失败，请检查配置。"
+
+# 工具配置
+tools:
+  # 计算器工具配置
+  calculator:
+    enabled: true  # 是否启用计算器工具
+    max_expression_length: 100  # 最大表达式长度
+  
+  # MCP服务工具配置
+  mcp:
+    enabled: true  # 是否启用MCP工具
+    timeout: 30  # MCP服务超时时间（秒）
+
+# 上下文压缩配置（如果使用service层）
+context_compression:
+  enabled: true  # 是否启用上下文压缩
+  # 五步压缩策略配置
+  strategies:
+    # 第1步：大结果存磁盘
+    disk_storage:
+      enabled: true
+      single_tool_limit: 50000  # 单个工具结果大小限制（字节）
+      total_message_limit: 200000  # 单条消息总大小限制（字节）
+      preview_size: 2000  # 预览摘要大小（字节）
+      storage_path: "storage/compressed/"  # 压缩文件存储路径
+    
+    # 第2步：砍掉远古消息
+    ancient_message:
+      enabled: true
+      max_message_age: 3600  # 消息最大年龄（秒）
+    
+    # 第3步：裁剪老的工具输出
+    tool_output_clipping:
+      enabled: true
+      time_decay_factor: 0.8  # 时间衰减因子
+    
+    # 第4步：读时投影
+    read_time_projection:
+      enabled: true
+      threshold_normal: 0.9  # 正常压缩阈值（上下文窗口的90%）
+      threshold_emergency: 0.95  # 紧急压缩阈值（上下文窗口的95%）
+    
+    # 第5步：全量摘要
+    full_summary:
+      enabled: true
+      summary_token_limit: 500  # 摘要最大令牌数
+
+# 服务层配置
+service:
+  llm_service:
+    enabled: true  # 是否启用LLM服务
+  context_compression_service:
+    enabled: true  # 是否启用上下文压缩服务
+  mcp_service:
+    enabled: true  # 是否启用MCP服务
