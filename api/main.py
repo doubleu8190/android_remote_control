@@ -7,15 +7,16 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from infra import database
 import logging
+import sys
 
 
 # 配置日志
 logging.basicConfig(
-    level=logging._nameToLevel[logging_config.get_config("logging.level", "INFO")],
+    level=getattr(logging, logging_config.get_config("logging.level", "INFO")),
     format=logging_config.get_config("logging.format"),
     datefmt=logging_config.get_config("logging.datefmt"),
     # filename=logging_config.get_config("logging.file", "app.log"),
-    stream=None,
+    stream=sys.stdout,
     encoding=logging_config.get_config("logging.encoding", "utf-8"),
 )
 
@@ -109,4 +110,4 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(root.app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
