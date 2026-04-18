@@ -8,7 +8,7 @@ from datetime import datetime
 import uuid
 
 # 从共享基础模块导入Base
-from .db_base import Base
+from infra.db_base import Base
 
 class User(Base):
     """用户表"""

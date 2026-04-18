@@ -1,23 +1,23 @@
 from datetime import datetime
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from engine.engine_manager import get_engine_for_user
+import logging
 import json
 import uuid
 
-from .models import (
+from model.models_api import (
     SendMessageRequest,
     SendMessageResponse,
-    StreamChunk,
     MessageResponse,
     MessageRole,
     MessageStatus
 )
 from .auth import get_current_active_user, UserInDB
-from .database import get_db
-from .models_db import Session as DBSession, Message as DBMessage
-from .engine_manager import get_engine_for_user, AIEngineWrapper
+from infra.database import get_db
+from model.models_db import Session as DBSession, Message as DBMessage
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
@@ -42,19 +42,12 @@ async def send_message(
     """发送消息并获取AI响应（非流式）"""
     # 获取或创建会话
     session_id = request.session_id
+    logging.info(f"发送消息到会话: {session_id}")
     if not session_id:
-        # 创建新会话
-        session_id = str(uuid.uuid4())
-        db_session = DBSession(
-            id=session_id,
-            user_id=current_user.id,
-            title="新聊天",
-            created_at=datetime.now(),
-            updated_at=datetime.now()
-        )
-        db.add(db_session)
-        db.commit()
-        db.refresh(db_session)
+        raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="会话不存在，请先创建会话"
+            )
     else:
         # 验证会话存在且属于当前用户
         db_session = db.query(DBSession)\
@@ -66,7 +59,7 @@ async def send_message(
         
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="会话不存在"
             )
     
@@ -87,10 +80,17 @@ async def send_message(
     
     db.commit()
     db.refresh(user_message)
+    logging.info(f"保存用户消息到 {session_id}: {user_message}")
     
     # 获取AI引擎并生成响应
     engine_wrapper = get_engine_for_user(current_user.id)
-    ai_response = engine_wrapper.process_message(session_id, request.message)
+    try:
+        ai_response = engine_wrapper.process_message(session_id, request.message)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"AI处理错误: {str(e)}"
+        )
     
     # 保存AI响应到数据库
     ai_message_id = str(uuid.uuid4())

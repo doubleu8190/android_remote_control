@@ -2,17 +2,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from model.models_api import UserCreate, UserResponse, Token, TokenData, UserInDB
+from infra.database import get_db
+from model.models_db import User
+import logging
 import os
 import uuid
 import html
 import re
-
-from .models import UserCreate, UserResponse, Token, TokenData, UserInDB
-from .database import get_db
-from .models_db import User
 
 # 安全配置
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here-change-in-production")
@@ -125,6 +125,7 @@ async def get_current_active_user(current_user: UserInDB = Depends(get_current_u
     """获取当前活跃用户"""
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="用户已被禁用")
+    logging.info(f"用户 {current_user} 已登录")
     return current_user
 
 @router.post("/register", response_model=UserResponse)

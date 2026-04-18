@@ -5,19 +5,11 @@ from typing import Dict, Any, Optional
 class ConfigLoader:
     """配置加载器，用于从 YAML 文件加载配置"""
     
-    _instance: Optional['ConfigLoader'] = None
     _config: Optional[Dict[str, Any]] = None
     
-    @classmethod
-    def get_instance(cls) -> 'ConfigLoader':
-        """获取配置加载器单例"""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-    
-    def __init__(self):
+    def __init__(self, config_path: str):
         """初始化配置加载器"""
-        self.config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'engine_config.yaml')
+        self.config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', config_path)
         self._load_config()
     
     def _load_config(self):
@@ -73,4 +65,5 @@ class ConfigLoader:
         self._load_config()
 
 # 全局配置实例
-config = ConfigLoader.get_instance()
+engine_config = ConfigLoader(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'engine_config.yaml'))
+logging_config = ConfigLoader(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'logging_config.yaml'))

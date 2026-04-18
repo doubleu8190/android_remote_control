@@ -27,7 +27,7 @@ export interface ApiResponse<T = any> {
 }
 
 export interface SendMessageRequest {
-  sessionId: string;
+  session_id: string;
   message: string;
   stream?: boolean;
 }

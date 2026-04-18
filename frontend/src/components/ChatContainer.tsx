@@ -19,9 +19,12 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   // 自动滚动到底部
   useEffect(() => {
     if (containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      // 使用requestAnimationFrame优化滚动性能
+      requestAnimationFrame(() => {
+        containerRef.current!.scrollTop = containerRef.current!.scrollHeight;
+      });
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   const handleClearChat = () => {
     if (window.confirm('Are you sure you want to clear all messages in this conversation?')) {
@@ -31,7 +34,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 h-full flex flex-col">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 h-[600px] sm:h-[700px] flex flex-col">
       <div className="p-4 border-b border-gray-200 flex justify-between items-center">
         <div>
           <h2 className="text-lg font-semibold text-gray-800">AI Chat</h2>
@@ -52,7 +55,12 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       <div className="flex-1 overflow-hidden">
         <div
           ref={containerRef}
-          className="h-full overflow-y-auto p-4"
+          className="h-full overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 dark:scrollbar-thumb-gray-600 dark:scrollbar-track-gray-800"
+          style={{
+            scrollBehavior: 'smooth',
+            // 确保在移动设备上也能正常滚动
+            WebkitOverflowScrolling: 'touch'
+          }}
         >
           <MessageList messages={messages} isLoading={isLoading} />
         </div>

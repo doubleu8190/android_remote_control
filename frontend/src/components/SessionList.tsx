@@ -110,7 +110,7 @@ const SessionList: React.FC<SessionListProps> = ({
 
   if (collapsed) {
     return (
-      <div className="py-2 flex flex-col h-full">
+      <div className="py-2 flex flex-col flex-1 min-h-0">
         {/* 新建会话按钮 - 固定在顶部 */}
         <div className="p-2 border-b border-gray-200 dark:border-gray-700">
           <button
@@ -177,7 +177,7 @@ const SessionList: React.FC<SessionListProps> = ({
   }
 
   return (
-    <div className="py-2 flex flex-col h-full">
+    <div className="py-2 flex flex-col flex-1 min-h-0">
       {/* 固定的标题和新建按钮 */}
       <div className="px-4 py-2 space-y-2 bg-white dark:bg-gray-800 z-10">
         <div className="flex items-center justify-between">

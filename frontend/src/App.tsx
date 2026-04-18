@@ -27,8 +27,8 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-          <header className="bg-white shadow-sm dark:bg-gray-800 dark:border-gray-700">
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
+          <header className="bg-white shadow-sm dark:bg-gray-800 dark:border-gray-700 shrink-0">
             <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">AI Agent Chat Interface</h1>
@@ -48,10 +48,12 @@ function App() {
               </div>
             </div>
           </header>
-          <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-            <AppRouter />
+          <main className="flex-1 overflow-hidden">
+            <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8 flex-1 min-h-0">
+              <AppRouter />
+            </div>
           </main>
-          <footer className="bg-white border-t border-gray-200 dark:bg-gray-800 dark:border-gray-700 mt-8">
+          <footer className="bg-white border-t border-gray-200 dark:bg-gray-800 dark:border-gray-700 shrink-0">
             <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 text-center text-gray-500 dark:text-gray-400 text-sm">
               <p>© 2026 AI Agent Platform. All rights reserved.</p>
             </div>

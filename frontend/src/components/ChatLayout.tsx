@@ -44,7 +44,7 @@ const ChatLayout: React.FC = () => {
     } finally {
       setLoadingSessions(false);
     }
-  }, [selectedSessionId]);
+  }, []);
 
   // 加载消息
   const loadMessages = useCallback(async (sessionId: string) => {
@@ -91,7 +91,7 @@ const ChatLayout: React.FC = () => {
       setMessages([]);
       setMessageError(null);
     }
-  }, [selectedSessionId, loadMessages]);
+  }, [selectedSessionId]);
 
   const handleLogout = async () => {
     await logout();
@@ -111,17 +111,20 @@ const ChatLayout: React.FC = () => {
     try {
       setCreatingSession(true);
       const now = new Date();
-      const title = `New Chat ${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+      const title = `New Chat ${now.toLocaleString()}`;
       const result = await chatApiService.createSession({
         title,
-        metadata: { engine: 'basic' }
+        metadata: { 
+          engine: 'basic',
+          timestamp: now.getTime() // 添加时间戳防止重复
+        }
       });
 
       if (result.success && result.data) {
+        // 先选择新创建的会话，再加载会话列表
+        setSelectedSessionId(result.data.id);
         // 重新加载会话列表
         await loadSessions();
-        // 选择新创建的会话
-        setSelectedSessionId(result.data.id);
       }
     } catch (error) {
       console.error('Failed to create session:', error);
@@ -167,7 +170,7 @@ const ChatLayout: React.FC = () => {
       
       // 调用API发送消息
       const result = await chatApiService.sendMessage({
-        sessionId: selectedSessionId,
+        session_id: selectedSessionId,
         message: content,
         stream: false,
       });
@@ -200,7 +203,7 @@ const ChatLayout: React.FC = () => {
   };
 
   return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex">
+      <div className="flex-1 flex">
         {/* 侧边栏 */}
         <div className={`${sidebarCollapsed ? 'w-16' : 'w-80'} bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 flex flex-col`}>
           {/* 用户信息 */}
@@ -245,7 +248,7 @@ const ChatLayout: React.FC = () => {
           </div>
 
           {/* 会话列表区域 */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto min-h-0">
             <SessionList
               sessions={sessions}
               selectedSessionId={selectedSessionId}
@@ -287,7 +290,7 @@ const ChatLayout: React.FC = () => {
 
         {/* 主聊天区域 */}
         <div className="flex-1 flex flex-col">
-          <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+          <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 shrink-0">
             <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex justify-between items-center">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">AI Agent Chat Interface</h1>
@@ -326,10 +329,11 @@ const ChatLayout: React.FC = () => {
             </div>
           </header>
           
-          <main className="flex-1 overflow-hidden">
+          <main className="flex-1 overflow-hidden min-h-0">
             {selectedSessionId ? (
-              <div className="h-full">
-                <ChatContainer
+              <div className="flex-1 flex items-center justify-center">
+                <div className="w-full">
+                  <ChatContainer
                   messages={messages}
                   onSendMessage={handleSendMessage}
                   isLoading={loadingMessages}
@@ -345,9 +349,10 @@ const ChatLayout: React.FC = () => {
                     </button>
                   </div>
                 )}
+                </div>
               </div>
             ) : (
-              <div className="h-full flex items-center justify-center">
+              <div className="h-[600px] sm:h-[700px] flex items-center justify-center">
                 <div className="text-center">
                   <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
