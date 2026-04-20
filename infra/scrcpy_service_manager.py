@@ -4,7 +4,7 @@ from math import log
 import subprocess  # nosec: B404 - subprocess用于启动外部进程，需要安全使用
 import json
 import websockets
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Set
 from .port_allocator import port_allocator
 
 
@@ -22,14 +22,37 @@ class ScrcpyService:
         self.session_id = session_id
         self.device_ip = device_ip
         self.device_port = device_port
-        self.process: subprocess.Popen | None = None
+        # scrcpy 输出的是编码后的视频流（H.264 in container），浏览器不能直接作为<img>播放
+        # 这里通过ffmpeg将H.264编码的视频流转换为（逐帧 JPEG）后再通过 Websocket 推送。
+        self.scrcpy_process: asyncio.subprocess.Process | None = None
+        self.ffmpeg_process: asyncio.subprocess.Process | None = None
         self.ws_port: int | None = None
         self.running: bool = False
-        self.clients = set()
+        self.clients: Set[Any] = set()
+        # websocket 同一连接不允许并发 send；用锁统一串行化发送（视频帧/控制消息共用）
+        self._send_locks: Dict[Any, asyncio.Lock] = {}
         self.ws_server = None
-        self.stderr_task: asyncio.Task | None = None
+        self.scrcpy_stderr_task: asyncio.Task | None = None
+        self.ffmpeg_stderr_task: asyncio.Task | None = None
+        self.pump_task: asyncio.Task | None = None
+        self.video_task: asyncio.Task | None = None
         self.connection_status = self.ConnectionStatus.DISCONNECTED
         self.error_message: str | None = None
+
+    async def _pipe_logger(self, prefix: str, stream: asyncio.StreamReader | None):
+        """持续读取子进程 stderr 并打印日志（不阻塞主循环）"""
+        if stream is None:
+            return
+        try:
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                logging.warning(
+                    f"{prefix}: {line.decode('utf-8', errors='ignore').strip()}"
+                )
+        except Exception as e:
+            logging.error("读取 %s stderr 时出错： %s", prefix, e)
 
     async def adb_connect(self) -> bool:
         """连接Android设备"""
@@ -56,7 +79,7 @@ class ScrcpyService:
             result = subprocess.run(
                 "adb devices", shell=True, capture_output=True, text=True
             )
-
+            logging.info(f"adb devices命令执行结果: {result.stdout}")
             if result.returncode == 0:
                 lines = result.stdout.strip().split("\n")
                 for line in lines:
@@ -72,23 +95,119 @@ class ScrcpyService:
         """处理scrcpy进程的stderr输出"""
         if not self.process:
             return
+        await self._pipe_logger("scrcpy stderr", self.scrcpy_process.stderr)
+
+    async def _broadcast_binary(self, payload: bytes):
+        """向所有客户端发送二进制数据；慢的客户端会被剔除，避免拖垮视频读取线程"""
+        if not self.clients:
+            return
+
+        async def _safe_send(ws) -> bool:
+            try:
+                lock = self._send_locks.get(ws)
+                if lock is None:
+                    lock = asyncio.Lock()
+                    self._send_locks[ws] = lock
+                async with lock:
+                    await asyncio.wait_for(ws.send(payload), timeout=0.5)
+                return True
+            except Exception as e:
+                logging.error(f"_safe_send 异常: {e}")
+                return False
+
+        results = await asyncio.gather(
+            *(_safe_send(ws) for ws in list(self.clients)), return_exceptions=True
+        )
+        # 清理发送失败的连接
+        for ws, ok in zip(list(self.clients), results):
+            if ok is not True:
+                self.clients.discard(ws)
+                self._send_locks.pop(ws, None)
+                try:
+                    await ws.close()
+                except Exception as e:
+                    logging.error(f"关闭客户端 {id(ws)} 连接时出错: {e}")
+
+    async def _pump_scrcpy_to_ffmpeg(self):
+        """将scrcpy进程的stdout持续写入ffmpeg进程的stdin"""
+        if (
+            self.scrcpy_process is None
+            or self.scrcpy_process.stdout is None
+            or self.ffmpeg_process is None
+            or self.ffmpeg_process.stdin is None
+        ):
+            logging.error("scrcpy 或 ffmpeg 进程未初始化, 无法启动管道转发")
+            return
+        try:
+            while self.is_running and self.scrcpy_process.returncode is None:
+                chunk = await self.scrcpy_process.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                self.ffmpeg_process.stdin.write(chunk)
+                await self.ffmpeg_process.stdin.drain()
+        except asyncio.CancelledError as e:
+            logging.error(f"_pump_scrcpy_to_ffmpeg时出错: {e}")
+        except Exception as e:
+            logging.error(f"scrcpy -> ffmpeg 管道转发异常: {e}")
+        finally:
+            try:
+                self.ffmpeg_process.stdin.close()
+            except Exception as e:
+                logging.error(f"关闭ffmpeg stdin 时出错: {e}")
+
+    async def _video_loop(self):
+        """
+        从 ffmpeg stdout 读取 MJPEG 字节流，按 JPEG 起止标记拆帧后广播。
+
+        关键点：
+        - 不能用 BufferedReader.read(4096) 这种“读满才返回”的 API，否则在数据不足时会表现为卡死；
+        - asyncio 子进程的 StreamReader.read(n) 会在“有数据可读”时尽快返回(<=n), 不会强制等满 n 字节；
+        """
+        if self.ffmpeg_process is None or self.ffmpeg_process.stdout is None:
+            logging.error("ffmpeg 进程未初始化, 无法启动视频读取循环")
+            return
+
+        buf = bytearray()
+        max_buf = 8 * 1024 * 1024
 
         try:
-            while self.process and self.process.poll() is None:
-                try:
-                    error = await asyncio.to_thread(self.process.stderr.readline)
-                    if not error:
-                        break
-                    logging.warning(
-                        f"scrcpy stderr: {
-                            error.decode('utf-8', errors='ignore').strip()
-                        }"
-                    )
-                except Exception as e:
-                    logging.error(f"读取scrcpy stderr时出错: {e}")
+            while (
+                self.is_running
+                and self.ffmpeg_process
+                and self.ffmpeg_process.returncode is None
+            ):
+                chunk = await self.ffmpeg_process.stdout.read(4096)
+                if not chunk:
                     break
+                buf.extend(chunk)
+                if len(buf) > max_buf:
+                    # 丢弃旧数据，尝试从最近的 JPEG 头开始重新同步
+                    start = buf.rfind(b"\xff\xd8")
+                    if start == -1:
+                        buf.clear()
+                    else:
+                        del buf[:start]
+
+                while True:
+                    start = buf.find(b"\xff\xd8")  # SOI
+                    if start == -1:
+                        # 保留末尾 1 字节，避免 SOI 被跨 chunk 拆开
+                        if len(buf) > 1:
+                            del buf[:-1]
+                        break
+                    end = buf.find(b"\xff\xd9", start + 2)  # EOI
+                    if end == -1:
+                        if start > 0:
+                            del buf[:start]
+                        break
+
+                    frame = bytes(buf[start : end + 2])
+                    del buf[: end + 2]
+                    await self._broadcast_binary(frame)
+        except asyncio.CancelledError:
+            logging.info("视频读取线程被取消")
         except Exception as e:
-            logging.error(f"处理scrcpy stderr时出错: {e}")
+            logging.error(f"视频读取/广播循环异常: {e}")
 
     async def handle_client(self, websocket):
         """处理WebSocket客户端连接"""
@@ -97,6 +216,7 @@ class ScrcpyService:
 
         # 添加客户端到集合
         self.clients.add(websocket)
+        self._send_locks.setdefault(websocket, asyncio.Lock())
 
         try:
             # 确保scrcpy服务正在运行
@@ -115,47 +235,22 @@ class ScrcpyService:
             await websocket.send(
                 json.dumps({"type": "info", "message": "连接成功，开始传输视频流"})
             )
-            logging.info(f"客户端连接成功: {client_id}，并成功发送连接成功提示消息")
-            # 发送视频流
-            while self.process and self.process.poll() is None:
+            # 不在每个客户端协程里读取视频流（会抢同一 stdout，且易出现阻塞）
+            # 这里仅负责：接收可选应用层 ping 并保持连接。
+            async for message in websocket:
+                if isinstance(message, (bytes, bytearray)):
+                    continue
+                logging.info(f"收到客户端消息: {message}")
                 try:
-                    # 读取视频数据（异步方式，避免阻塞事件循环）
-                    logging.debug("尝试读取视频数据")
-                    try:
-                        # 使用asyncio.to_thread在后台线程中执行同步读取操作
-                        data = await asyncio.to_thread(self.process.stdout.read, 4096)
-                    except Exception as read_error:
-                        logging.error(f"读取视频数据时出错: {read_error}")
-                        break
-                    
-                    if not data:
-                        logging.warning("视频流数据为空，可能scrcpy已停止")
-                        break
-
-                    # 发送给客户端
-                    logging.debug(f"发送视频数据: {len(data)} 字节")
-                    try:
-                        # 添加超时控制，避免发送操作阻塞
-                        await asyncio.wait_for(websocket.send(data), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        logging.error("发送视频数据超时，客户端可能已断开")
-                        break
-                    except websockets.exceptions.ConnectionClosed:
-                        logging.info(f"客户端断开连接: {client_id}")
-                        break
-
-                    # 添加小的延迟避免CPU占用过高
-                    await asyncio.sleep(0.001)
-
-                except websockets.exceptions.ConnectionClosed:
-                    logging.info(f"客户端断开连接: {client_id}")
-                    break
-                except websockets.exceptions.WebSocketException as e:
-                    logging.error(f"WebSocket错误: {e}")
-                    break
+                    obj = json.loads(message)
                 except Exception as e:
-                    logging.error(f"视频流传输错误: {e}")
-                    break
+                    logging.error(f"客户端发送无效JSON: {e}")
+                    obj = None
+                if message == "ping" or (
+                    isinstance(obj, dict) and obj.get("type") == "ping"
+                ):
+                    async with self._send_locks[websocket]:
+                        await websocket.send(json.dumps({"type": "pong"}))
 
         except Exception as e:
             logging.error(f"处理客户端异常: {e}")
@@ -170,6 +265,7 @@ class ScrcpyService:
         finally:
             # 清理客户端连接
             self.clients.discard(websocket)
+            self._send_locks.pop(websocket, None)
             logging.info(f"客户端连接关闭: {client_id}")
 
             # 如果没有客户端连接，考虑停止服务
@@ -180,6 +276,7 @@ class ScrcpyService:
 
     async def start(self) -> int:
         """启动scrcpy服务并返回WebSocket端口"""
+        logging.info(f"准备启动scrcpy服务，会话ID: {self.session_id}")
         # 确保端口在任何情况下都能被释放
         allocated_port = None
 
@@ -211,47 +308,88 @@ class ScrcpyService:
             self.ws_port = allocated_port
 
             # 构建scrcpy命令
-            cmd = [
+            # 不能使用 `-- record -` 会被scrcpy当作“文件名为`-`”写入磁盘，而不是写到 stdout
+            scrcpy_cmd = [
                 "scrcpy",
                 "-s",
                 f"{self.device_ip}:{self.device_port}",
                 "--no-audio",
-                "--no-window",
-                "--record", "-",
-                "--record-format", "mkv",
-                "-m", "800",
-                "--max-fps", "30",
-                "--video-bit-rate", "4M",
-                "--video-codec", "h264",
-                "--capture-orientation", "0",
+                "--no-playback",
                 "--no-control",
-                "--render-driver=opengl",
-                "--no-playback",  # 替代--no-display，确保不显示窗口，只输出到stdout
-                "--push-target", "/data/local/tmp/",  # 指定推送目标
-                "--force-adb-forward"  # 强制ADB转发
+                "--record",
+                "/dev/stdout",
+                "--record-format",
+                "mkv",
+                "-m",
+                "800",
+                "--max-fps",
+                "30",
+                "--video-bit-rate",
+                "4M",
+                "--video-codec",
+                "h264",
+                "--capture-orientation",
+                "0",
+                "--push-target",
+                "/data/local/tmp/",  # 指定推送目标
+                "--force-adb-forward",  # 强制ADB转发
             ]
 
-            # 启动scrcpy进程
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=1024 * 1024,
+            # 启动scrcpy进程, srcpy(mkv/h264) -> ffmpeg -> stdout(mjpeg)
+            self.scrcpy_process = await asyncio.create_subprocess_exec(
+                *scrcpy_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             logging.info(
-                f"启动scrcpy服务，pid: {self.process.pid}，设备: {self.device_ip}:{self.device_port}"
+                f"启动scrcpy服务，pid: {self.scrcpy_process.pid}，设备: {self.device_ip}:{self.device_port}"
             )
 
             # 启动stderr处理任务
-            self.stderr_task = asyncio.create_task(self.handle_stderr())
+            self.scrcpy_stderr_task = asyncio.create_task(
+                self._pipe_logger("scrcpy_stderr", self.scrcpy_process.stderr)
+            )
 
-            # 检查scrcpy进程是否正常启动
-            logging.info(f"等待scrcpy进程启动，pid: {self.process.pid}")
-            await asyncio.sleep(5)  # 等待进程启动
-            logging.info(f"scrcpy进程启动检查，pid: {self.process.pid}")
-            if self.process.poll() is not None:
+            # ffmpeg 转码为 MJPEG 前端用<img>逐帧刷新
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                "pipe:0",
+                "-f",
+                "image2pipe",
+                "-vcodec",
+                "mjpeg",
+                "-q:v",
+                "5",
+                "pipe:1",
+            ]
+            self.ffmpeg_process = await asyncio.create_subprocess_exec(
+                *ffmpeg_cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            logging.info(f"启动ffmpeg服务，pid: {self.ffmpeg_process.pid}，设备: {self.device_ip}:{self.device_port}")
+            self.ffmpeg_stderr_task = asyncio.create_task(
+                self._pipe_logger("ffmpeg_stderr", self.ffmpeg_process.stderr)
+            )
+
+            # scrcpy 输出写入 ffmpeg 输入 （create_subprocess_exec 不支持直接把 StreamReader 作为 stdin）
+            self.running = True
+            self.pump_task = asyncio.create_task(self._pump_scrcpy_to_ffmpeg())
+
+            # 检查子进程是否立即退出
+            await asyncio.sleep(2)  # 等待进程启动
+            if self.scrcpy_process.returncode is not None:
                 raise RuntimeError(
-                    f"scrcpy进程启动失败，退出码: {self.process.returncode}"
+                    f"scrcpy进程启动失败，退出码: {self.scrcpy_process.returncode}"
+                )
+            if self.ffmpeg_process.returncode is not None:
+                raise RuntimeError(
+                    f"ffmpeg进程启动失败，退出码: {self.ffmpeg_process.returncode}"
                 )
 
             # 启动WebSocket服务器
@@ -266,10 +404,12 @@ class ScrcpyService:
                 logging.error(f"启动WebSocket服务器失败: {ws_error}")
                 raise
 
-            self.running = True
             self.connection_status = self.ConnectionStatus.CONNECTED
-            logging.info(f"scrcpy服务已启动 (PID: {self.process.pid})")
+            logging.info(f"scrcpy服务已启动 (PID: {self.scrcpy_process.pid})")
             logging.info(f"WebSocket服务器已启动，监听端口: {self.ws_port}")
+
+            # 启动视频读取与广播任务（单一读取，避免 stdout 竞争/阻塞）
+            self.video_task = asyncio.create_task(self._video_loop())
 
             return self.ws_port
 
@@ -285,24 +425,48 @@ class ScrcpyService:
                     logging.info(f"已释放WebSocket端口: {allocated_port}")
                 except Exception as release_error:
                     logging.error(f"释放端口 {allocated_port} 时出错: {release_error}")
-            # 清理进程
-            if self.process:
-                try:
-                    self.process.terminate()
-                    self.process.wait(timeout=5)
-                except Exception as proc_error:
-                    logging.error(f"停止进程时出错: {proc_error}")
-            # 清理任务
-            if self.stderr_task:
-                try:
-                    self.stderr_task.cancel()
-                    await asyncio.gather(self.stderr_task, return_exceptions=True)
-                except Exception as task_error:
-                    logging.error(f"取消任务时出错: {task_error}")
+            # 清理任务/进程
+            for task in [
+                self.video_task,
+                self.pump_task,
+                self.scrcpy_stderr_task,
+                self.ffmpeg_stderr_task,
+            ]:
+                if task:
+                    task.cancel()
+            for task in [
+                self.video_task,
+                self.pump_task,
+                self.scrcpy_stderr_task,
+                self.ffmpeg_stderr_task,
+            ]:
+                if task:
+                    try:
+                        await asyncio.gather(task, return_exceptions=True)
+                    except Exception as task_error:
+                        logging.error(f"取消任务时出错: {task_error}")
+            for proc in [self.scrcpy_process, self.ffmpeg_process]:
+                if proc and proc.returncode is None:
+                    try:
+                        proc.terminate()
+                        await asyncio.wait_for(proc.wait(), timeout=5)
+                    except Exception as proc_error:
+                        try:
+                            logging.error(
+                                f"终止进程时出错:{proc_error}, 强制终止: {proc.pid}"
+                            )
+                            proc.kill()
+                        except Exception as e:
+                            logging.error(f"强制终止进程时出错: {e}")
+
             # 重置状态
-            self.process = None
+            self.scrcpy_process = None
+            self.ffmpeg_process = None
             self.ws_server = None
-            self.stderr_task = None
+            self.scrcpy_stderr_task = None
+            self.ffmpeg_stderr_task = None
+            self.pump_task = None
+            self.video_task = None
             self.ws_port = None
             self.running = False
             raise
@@ -311,7 +475,7 @@ class ScrcpyService:
         """停止scrcpy服务"""
         if self.running:
             logging.info(
-                f"停止scrcpy服务 (PID: {self.process.pid if self.process else 'N/A'})"
+                f"停止ffmpeg服务 (PID: {self.scrcpy_process.pid if self.ffmpeg_process else 'N/A'})"
             )
 
             # 关闭WebSocket服务器
@@ -323,29 +487,53 @@ class ScrcpyService:
                 except Exception as e:
                     logging.error(f"关闭WebSocket服务器时出错: {e}")
 
-            # 停止scrcpy进程
-            if self.process and self.process.poll() is None:
-                try:
-                    self.process.terminate()
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    logging.warning("scrcpy服务未响应，强制终止")
-                    self.process.kill()
-                    self.process.wait()
+            # 停止scrcpy进程，取消后台任务
+            for task in [
+                self.video_task,
+                self.pump_task,
+                self.scrcpy_stderr_task,
+                self.ffmpeg_stderr_task,
+            ]:
+                if task:
+                    task.cancel()
+            for task in [
+                self.video_task,
+                self.pump_task,
+                self.scrcpy_stderr_task,
+                self.ffmpeg_stderr_task,
+            ]:
+                if task:
+                    try:
+                        await asyncio.gather(task, return_exceptions=True)
+                    except Exception as task_error:
+                        logging.error(f"取消任务时出错: {task_error}")
 
-            # 取消stderr处理任务
-            if self.stderr_task:
-                try:
-                    self.stderr_task.cancel()
-                    await asyncio.gather(self.stderr_task, return_exceptions=True)
-                    logging.info("stderr处理任务已取消")
-                except Exception as e:
-                    logging.error(f"取消stderr处理任务时出错: {e}")
+            # 停止子进程（先终止ffmpeg，再终止scrcpy）
+            for proc, name in [
+                (self.ffmpeg_process, "ffmpeg"),
+                (self.scrcpy_process, "scrcpy"),
+            ]:
+                if proc and proc.returncode is None:
+                    try:
+                        proc.terminate()
+                        await asyncio.wait_for(proc.wait(), timeout=5)
+                    except Exception as proc_error:
+                        try:
+                            logging.error(
+                                f"终止进程时出错:{proc_error}, 强制终止: {name}({proc.pid})"
+                            )
+                            proc.kill()
+                        except Exception as e:
+                            logging.error(f"强制终止进程时出错: {e}")
 
             # 清理资源
-            self.process = None
+            self.scrcpy_process = None
+            self.ffmpeg_process = None
             self.ws_server = None
-            self.stderr_task = None
+            self.scrcpy_stderr_task = None
+            self.ffmpeg_stderr_task = None
+            self.pump_task = None
+            self.video_task = None
             self.running = False
             # 设置连接状态为未连接
             self.connection_status = self.ConnectionStatus.DISCONNECTED
@@ -364,8 +552,10 @@ class ScrcpyService:
         if not self.running:
             return False
 
-        # 检查scrcpy进程是否运行中
-        if not self.process or self.process.poll() is not None:
+        # 检查scrcpy/ffmpeg进程是否运行中
+        if not self.scrcpy_process or self.scrcpy_process.returncode is not None:
+            return False
+        if not self.ffmpeg_process or self.ffmpeg_process.returncode is not None:
             return False
 
         # 检查WebSocket服务器是否运行中
@@ -390,16 +580,20 @@ class ScrcpyServiceManager:
             # 检查是否已有该会话的服务
             if session_id in self.services:
                 service = self.services[session_id]
+                logging.info(f"发现会话{session_id}已存在，检查会话的scrcpy服务状态")
                 if service.is_running():
                     logging.info(
                         f"会话 {session_id} 的scrcpy服务已在运行，端口: {service.ws_port}"
                     )
+                    assert service.ws_port is not None, "scrcpy服务端口未分配"
                     return service.ws_port
                 else:
+                    logging.info(f"会话 {session_id} 的scrcpy服务已停止，移除并重新创建")
                     # 服务已停止，移除并重新创建
                     del self.services[session_id]
 
             # 创建新服务
+            logging.info(f"准备创建新的scrcpy服务，会话ID: {session_id}")
             service = ScrcpyService(session_id, device_ip, device_port)
             ws_port = await service.start()
             self.services[session_id] = service
