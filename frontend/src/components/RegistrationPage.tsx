@@ -97,7 +97,7 @@ const RegistrationPage: React.FC = () => {
         }
         return undefined;
 
-      case 'email':
+      case 'email': {
         if (!value.trim()) {
           return undefined;
         }
@@ -106,6 +106,7 @@ const RegistrationPage: React.FC = () => {
           return 'Invalid email format';
         }
         return undefined;
+      }
 
       case 'password':
         if (!value) {

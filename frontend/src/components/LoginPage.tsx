@@ -18,7 +18,7 @@ const LoginPage: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated && loginSuccessRef.current) {
       loginSuccessRef.current = false;
-      const from = (location.state as any)?.from?.pathname || '/chat';
+      const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/chat';
       navigate(from, { replace: true });
     }
   }, [isAuthenticated, navigate, location]);
@@ -28,7 +28,7 @@ const LoginPage: React.FC = () => {
     if (error) {
       clearError();
     }
-  }, [username, password, clearError]);
+  }, [username, password, error, clearError]);
 
   // 同步记住我状态
   useEffect(() => {
@@ -196,7 +196,7 @@ const LoginPage: React.FC = () => {
 
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link to="/register" className="text-blue-600 hover:text-blue-700 font-medium">
                 Create one
               </Link>

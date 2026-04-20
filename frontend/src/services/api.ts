@@ -141,7 +141,7 @@ export class ChatApiService {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      const response = await fetch(`${this.baseUrl}/sessions/`, { headers });
+      const response = await fetch(`${this.baseUrl}/sessions/list`, { headers });
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

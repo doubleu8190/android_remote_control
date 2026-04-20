@@ -7,10 +7,12 @@ import re
 
 # ==================== 枚举类型 ====================
 
+
 class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
+
 
 class MessageStatus(str, Enum):
     SENDING = "sending"
@@ -21,10 +23,12 @@ class MessageStatus(str, Enum):
 
 # ==================== 请求/响应模型 ====================
 
+
 class UserBase(BaseModel):
     username: str
     email: Optional[str] = None
     full_name: Optional[str] = None
+
 
 class UserCreate(UserBase):
     password: str
@@ -76,21 +80,25 @@ class UserCreate(UserBase):
             raise ValueError('姓名不能超过100个字符')
         return v.strip()
 
+
 class UserLogin(BaseModel):
     username: str
     password: str
+
 
 class UserResponse(UserBase):
     id: str
     created_at: datetime
     updated_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: Optional[int] = None
+
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -98,23 +106,27 @@ class TokenData(BaseModel):
 
 # ==================== 消息模型 ====================
 
+
 class MessageBase(BaseModel):
     content: str
     role: MessageRole = MessageRole.USER
     status: MessageStatus = MessageStatus.SENT
     metadata: Optional[Dict[str, Any]] = None
 
+
 class MessageCreate(MessageBase):
     pass
+
 
 class MessageResponse(MessageBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = Field(default_factory=datetime.now)
     session_id: str
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 # ==================== 会话模型 ====================
+
 
 class SessionBase(BaseModel):
     title: str = "New Chat"
@@ -122,8 +134,10 @@ class SessionBase(BaseModel):
     device_port: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
 
+
 class SessionCreate(SessionBase):
     pass
+
 
 class SessionResponse(SessionBase):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -131,8 +145,9 @@ class SessionResponse(SessionBase):
     messages: List[MessageResponse] = []
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class SessionUpdate(BaseModel):
     title: Optional[str] = None
@@ -142,10 +157,12 @@ class SessionUpdate(BaseModel):
 
 # ==================== 聊天请求/响应 ====================
 
+
 class SendMessageRequest(BaseModel):
     message: str
     stream: bool = False
     session_id: Optional[str] = None  # 如果为空，创建新会话
+
 
 class SendMessageResponse(BaseModel):
     message_id: str
@@ -155,10 +172,12 @@ class SendMessageResponse(BaseModel):
     session_id: str
     stream: bool = False
 
+
 class StreamChunk(BaseModel):
     type: str  # 'text', 'tool_call', 'tool_result', 'error', 'done'
     data: str
     message_id: Optional[str] = None
+
 
 class ChatResponse(BaseModel):
     success: bool = True
@@ -167,6 +186,7 @@ class ChatResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
 # ==================== 数据库模型（模拟） ====================
+
 
 class UserInDB(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -178,6 +198,7 @@ class UserInDB(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
     is_active: bool = True
 
+
 class SessionInDB(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -186,6 +207,7 @@ class SessionInDB(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     metadata: Optional[Dict[str, Any]] = None
+
 
 class MessageInDB(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))

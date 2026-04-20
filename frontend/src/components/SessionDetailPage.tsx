@@ -8,7 +8,7 @@ import { chatApiService } from '../services/api';
 
 const SessionDetailPage: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const { } = useAuth();
+  const auth = useAuth(); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);

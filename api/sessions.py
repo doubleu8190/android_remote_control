@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from .auth import get_current_active_user, UserInDB
@@ -52,7 +52,7 @@ def session_to_response(db_session: DBSession) -> SessionResponse:
     )
 
 
-@router.get("/", response_model=List[SessionResponse])
+@router.get("/list", response_model=List[SessionResponse])
 async def list_sessions(
     skip: int = 0,
     limit: int = 100,
@@ -104,7 +104,8 @@ async def create_session(
         db_session = DBSession(
             id=session_id,
             user_id=current_user.id,
-            title=session_data.title or f"新会话 {now.strftime('%Y-%m-%d %H:%M:%S')}",
+            title=session_data.title or f"新会话 {
+                now.strftime('%Y-%m-%d %H:%M:%S')}",
             device_ip=session_data.device_ip,
             device_port=session_data.device_port,
             session_metadata=session_data.metadata,
@@ -140,7 +141,9 @@ async def get_session(
         .first()
     )
     if not db_session:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="会话不存在")
 
     return session_to_response(db_session)
 
@@ -160,7 +163,9 @@ async def update_session(
         .first()
     )
     if not db_session:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="会话不存在")
 
     # 更新字段
     update_data = session_update.dict(exclude_unset=True)
@@ -190,7 +195,9 @@ async def delete_session(
         .first()
     )
     if not db_session:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="会话不存在")
 
     # 获取scrcpy服务会话ID
     scrcpy_session_id = None
@@ -199,7 +206,9 @@ async def delete_session(
         scrcpy_session_id = db_session.session_metadata["scrcpy_session_id"]
         logging.info(f"从数据库会话metadata中获取到scrcpy服务会话ID: {scrcpy_session_id}")
     else:
-        logging.warning(f"数据库会话metadata中没有scrcpy_session_id: {db_session.session_metadata}")
+        logging.warning(
+            f"数据库会话metadata中没有scrcpy_session_id: {
+                db_session.session_metadata}")
 
     # 删除会话（关联消息将自动删除，因为设置了cascade）
     db.delete(db_session)
@@ -238,11 +247,17 @@ async def connect_device(
         logging.info(f"request.ip: {request.ip}")
         logging.info(f"request.port: {request.port}")
         logging.info(f"request.session_id: {request.session_id}")
-        
+
         # 生成唯一的会话ID
-        scrcpy_session_id = f"device_{request.ip}_{request.port}_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
+        scrcpy_session_id = f"device_{
+            request.ip}_{
+            request.port}_{
+            int(
+                datetime.now().timestamp())}_{
+                    uuid.uuid4().hex[
+                        :8]}"
         logging.info(f"生成的scrcpy服务会话ID: {scrcpy_session_id}")
-        
+
         # 使用服务管理器创建并启动scrcpy服务
         ws_port = await scrcpy_service_manager.create_service(
             session_id=scrcpy_session_id,
@@ -250,7 +265,7 @@ async def connect_device(
             device_port=request.port
         )
         logging.info(f"创建scrcpy服务成功，WebSocket端口: {ws_port}")
-        
+
         # 如果提供了数据库会话ID，将scrcpy服务的会话ID存储在数据库会话的metadata中
         if request.session_id:
             # 查找数据库会话
@@ -259,7 +274,7 @@ async def connect_device(
                 DBSession.id == request.session_id,
                 DBSession.user_id == current_user.id
             ).first()
-            
+
             if db_session:
                 logging.info(f"找到数据库会话: {db_session}")
                 # 确保session_metadata是字典
@@ -272,22 +287,27 @@ async def connect_device(
                 db_session.device_port = str(request.port)
                 db_session.updated_at = datetime.now()
                 db.commit()
-                
+
                 # 重新查询数据库会话，确保更新成功
                 db_session = db.query(DBSession).filter(
                     DBSession.id == request.session_id,
                     DBSession.user_id == current_user.id
                 ).first()
-                
+
                 # 打印日志
-                logging.info(f"已将scrcpy服务会话ID {scrcpy_session_id} 关联到数据库会话 {request.session_id}")
+                logging.info(
+                    f"已将scrcpy服务会话ID {scrcpy_session_id} 关联到数据库会话 {
+                        request.session_id}")
                 logging.info(f"数据库会话metadata: {db_session.session_metadata}")
-                logging.info(f"数据库会话设备信息: {db_session.device_ip}:{db_session.device_port}")
+                logging.info(
+                    f"数据库会话设备信息: {
+                        db_session.device_ip}:{
+                        db_session.device_port}")
             else:
                 logging.warning(f"未找到数据库会话: {request.session_id}")
         else:
             logging.warning("未提供数据库会话ID")
-        
+
         # 返回WebSocket URL和会话ID
         return {
             "status": "success",
@@ -327,9 +347,11 @@ async def connect_session_device(
             .filter(DBSession.id == session_id, DBSession.user_id == current_user.id)
             .first()
         )
-        
+
         if not db_session:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="会话不存在")
 
         # 检查会话是否有保存的IP地址和端口
         if not db_session.device_ip or not db_session.device_port:
@@ -344,7 +366,11 @@ async def connect_session_device(
         logging.info(f"快速连接设备: {device_ip}:{device_port}, 会话ID: {session_id}")
 
         # 生成唯一的会话ID
-        scrcpy_session_id = f"device_{device_ip}_{device_port}_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
+        scrcpy_session_id = f"device_{device_ip}_{device_port}_{
+            int(
+                datetime.now().timestamp())}_{
+            uuid.uuid4().hex[
+                :8]}"
         logging.info(f"生成的scrcpy服务会话ID: {scrcpy_session_id}")
 
         # 使用服务管理器创建并启动scrcpy服务
@@ -402,9 +428,11 @@ async def rename_session(
         .filter(DBSession.id == session_id, DBSession.user_id == current_user.id)
         .first()
     )
-        
+
     if not db_session:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="会话不存在")
 
     # 更新标题
     db_session.title = title
@@ -430,9 +458,11 @@ async def update_session_device(
         .filter(DBSession.id == session_id, DBSession.user_id == current_user.id)
         .first()
     )
-        
+
     if not db_session:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="会话不存在")
 
     # 更新设备信息
     db_session.device_ip = device_ip

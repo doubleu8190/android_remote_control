@@ -110,4 +110,5 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
 
+    # nosec B104: 开发环境允许绑定到所有接口，生产环境应限制
     uvicorn.run(app, host="0.0.0.0", port=8000)

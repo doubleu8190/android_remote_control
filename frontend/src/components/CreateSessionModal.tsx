@@ -34,7 +34,9 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
   // 当默认值改变时更新状态
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIpAddress(defaultIp);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPort(defaultPort);
       setIpError('');
       setPortError('');

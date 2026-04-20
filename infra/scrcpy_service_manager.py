@@ -1,6 +1,6 @@
 import asyncio
 import logging
-import subprocess
+import subprocess  # nosec: B404 - subprocess用于启动外部进程，需要安全使用
 import json
 import uuid
 import websockets
@@ -22,22 +22,21 @@ class ScrcpyService:
         self.session_id = session_id
         self.device_ip = device_ip
         self.device_port = device_port
-        self.process: Optional[subprocess.Popen] = None
-        self.ws_port: Optional[int] = None
-        self.running = False
+        self.process: subprocess.Popen | None = None
+        self.ws_port: int | None = None
+        self.running: bool = False
         self.clients = set()
         self.ws_server = None
-        self.stderr_task: Optional[asyncio.Task] = None
+        self.stderr_task: asyncio.Task | None = None
         self.connection_status = self.ConnectionStatus.DISCONNECTED
-        self.error_message: Optional[str] = None
+        self.error_message: str | None = None
 
     async def adb_connect(self) -> bool:
         """连接Android设备"""
         try:
             logging.info(f"正在连接ADB设备: {self.device_ip}:{self.device_port}")
             result = subprocess.run(
-                f"adb connect {self.device_ip}:{self.device_port}",
-                shell=True,
+                ["adb", "connect", f"{self.device_ip}:{self.device_port}"],
                 capture_output=True,
                 text=True,
             )
@@ -83,7 +82,10 @@ class ScrcpyService:
                     if not error:
                         break
                     logging.warning(
-                        f"scrcpy stderr: {error.decode('utf-8', errors='ignore').strip()}"
+                        f"scrcpy stderr: {
+                            error.decode(
+                                'utf-8',
+                                errors='ignore').strip()}"
                     )
                 except Exception as e:
                     logging.error(f"读取scrcpy stderr时出错: {e}")
@@ -150,7 +152,7 @@ class ScrcpyService:
                         {"type": "error", "message": f"处理连接时出错: {str(e)}"}
                     )
                 )
-            except:
+            except BaseException:
                 pass
         finally:
             # 清理客户端连接
@@ -178,7 +180,9 @@ class ScrcpyService:
                 logging.warning("ADB设备未连接，尝试连接...")
                 if not await self.adb_connect():
                     self.connection_status = self.ConnectionStatus.FAILED
-                    self.error_message = f"无法连接ADB设备: {self.device_ip}:{self.device_port}"
+                    self.error_message = f"无法连接ADB设备: {
+                        self.device_ip}:{
+                        self.device_port}"
                     raise RuntimeError(
                         f"无法连接ADB设备: {self.device_ip}:{self.device_port}"
                     )
@@ -223,7 +227,10 @@ class ScrcpyService:
                 bufsize=1024 * 1024,
             )
             logging.info(
-                f"启动scrcpy服务，pid: {self.process.pid}，设备: {self.device_ip}:{self.device_port}"
+                f"启动scrcpy服务，pid: {
+                    self.process.pid}，设备: {
+                    self.device_ip}:{
+                    self.device_port}"
             )
 
             # 启动stderr处理任务
@@ -234,13 +241,15 @@ class ScrcpyService:
             await asyncio.sleep(5)  # 等待进程启动
             logging.info(f"scrcpy进程启动检查，pid: {self.process.pid}")
             if self.process.poll() is not None:
-                raise RuntimeError(f"scrcpy进程启动失败，退出码: {self.process.returncode}")
+                raise RuntimeError(
+                    f"scrcpy进程启动失败，退出码: {
+                        self.process.returncode}")
 
             # 启动WebSocket服务器
             try:
                 logging.info(f"准备启动WebSocket服务器，监听端口: {self.ws_port}")
                 self.ws_server = await websockets.serve(
-                    self.handle_client, "0.0.0.0", self.ws_port
+                    self.handle_client, "0.0.0.0", self.ws_port  # nosec B104
                 )
             except Exception as ws_error:
                 logging.error(f"启动WebSocket服务器失败: {ws_error}")
@@ -264,7 +273,8 @@ class ScrcpyService:
                     port_allocator.release_port(allocated_port)
                     logging.info(f"已释放WebSocket端口: {allocated_port}")
                 except Exception as release_error:
-                    logging.error(f"释放端口 {allocated_port} 时出错: {release_error}")
+                    logging.error(
+                        f"释放端口 {allocated_port} 时出错: {release_error}")
             # 清理进程
             if self.process:
                 try:
@@ -291,7 +301,8 @@ class ScrcpyService:
         """停止scrcpy服务"""
         if self.running:
             logging.info(
-                f"停止scrcpy服务 (PID: {self.process.pid if self.process else 'N/A'})"
+                f"停止scrcpy服务 (PID: {
+                    self.process.pid if self.process else 'N/A'})"
             )
 
             # 关闭WebSocket服务器
@@ -422,7 +433,8 @@ class ScrcpyServiceManager:
                 }
             return services_info
 
-    async def get_service_status(self, session_id: str) -> Optional[Dict[str, Any]]:
+    async def get_service_status(
+            self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取指定会话的服务状态"""
         async with self.lock:
             if session_id in self.services:

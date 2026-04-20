@@ -14,8 +14,6 @@ import logging
 
 # 导入service层（如果存在）
 try:
-    from infra.llm_service import LLMService
-    from infra.context_compression import ContextCompressionService
     from infra.mcp_service import MCPService
 
     HAS_SERVICE_LAYER = True
@@ -108,13 +106,17 @@ class AIEngineWrapper:
         def test_tool(query: str) -> str:
             return f"测试工具: {query}"
 
-        tools.append(Tool(name="test_tool", func=test_tool, description="测试工具"))
+        tools.append(
+            Tool(
+                name="test_tool",
+                func=test_tool,
+                description="测试工具"))
 
         # 如果存在service层，可以添加更多工具
         if HAS_SERVICE_LAYER:
             try:
                 # 添加MCP工具
-                mcp_service = MCPService()
+                _ = MCPService()  # 创建MCP服务实例，但当前未使用
                 # 这里可以添加MCP工具，具体取决于MCP服务的实现
                 pass
             except Exception as e:
@@ -160,7 +162,8 @@ class AIEngineWrapper:
             logging.info(f"从数据库获取会话 {session_id} 的消息: {db_messages}")
             if len(db_messages) > 0:
                 # 转换为langchain_core.messages格式
-                messages = [{"role": msg.role, "content": msg.content} for msg in db_messages]
+                messages = [{"role": msg.role, "content": msg.content}
+                            for msg in db_messages]
                 logging.info(f"转换后的消息: {messages}")
                 builder.with_history(messages)
 

@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types */
 import React, { memo } from 'react';
 import { SessionResponse } from '../types/chat';
 
@@ -344,5 +345,7 @@ const SessionList: React.FC<SessionListProps> = memo(({
     </div>
   );
 });
+
+SessionList.displayName = 'SessionList';
 
 export default SessionList;

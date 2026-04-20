@@ -44,7 +44,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     const savedActiveSessionId = StorageService.loadActiveSessionId();
 
     if (savedSessions.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSessions(savedSessions);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveSessionId(savedActiveSessionId || savedSessions[0].id);
     } else {
       // 创建默认会话
