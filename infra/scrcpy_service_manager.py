@@ -1,8 +1,8 @@
 import asyncio
 import logging
+from math import log
 import subprocess  # nosec: B404 - subprocess用于启动外部进程，需要安全使用
 import json
-import uuid
 import websockets
 from typing import Optional, Dict, Any
 from .port_allocator import port_allocator
@@ -34,13 +34,11 @@ class ScrcpyService:
     async def adb_connect(self) -> bool:
         """连接Android设备"""
         try:
-            logging.info(f"正在连接ADB设备: {self.device_ip}:{self.device_port}")
             result = subprocess.run(
                 ["adb", "connect", f"{self.device_ip}:{self.device_port}"],
                 capture_output=True,
                 text=True,
             )
-            logging.info(f"ADB连接结果: {result}")
             if result.returncode == 0 and "connected" in result.stdout.lower():
                 logging.info(f"ADB连接成功: {self.device_ip}:{self.device_port}")
                 await asyncio.sleep(1)  # 等待连接稳定
@@ -83,9 +81,8 @@ class ScrcpyService:
                         break
                     logging.warning(
                         f"scrcpy stderr: {
-                            error.decode(
-                                'utf-8',
-                                errors='ignore').strip()}"
+                            error.decode('utf-8', errors='ignore').strip()
+                        }"
                     )
                 except Exception as e:
                     logging.error(f"读取scrcpy stderr时出错: {e}")
@@ -118,18 +115,34 @@ class ScrcpyService:
             await websocket.send(
                 json.dumps({"type": "info", "message": "连接成功，开始传输视频流"})
             )
-
+            logging.info(f"客户端连接成功: {client_id}，并成功发送连接成功提示消息")
             # 发送视频流
             while self.process and self.process.poll() is None:
                 try:
-                    # 读取视频数据
-                    data = self.process.stdout.read(4096)
+                    # 读取视频数据（异步方式，避免阻塞事件循环）
+                    logging.debug("尝试读取视频数据")
+                    try:
+                        # 使用asyncio.to_thread在后台线程中执行同步读取操作
+                        data = await asyncio.to_thread(self.process.stdout.read, 4096)
+                    except Exception as read_error:
+                        logging.error(f"读取视频数据时出错: {read_error}")
+                        break
+                    
                     if not data:
                         logging.warning("视频流数据为空，可能scrcpy已停止")
                         break
 
                     # 发送给客户端
-                    await websocket.send(data)
+                    logging.debug(f"发送视频数据: {len(data)} 字节")
+                    try:
+                        # 添加超时控制，避免发送操作阻塞
+                        await asyncio.wait_for(websocket.send(data), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        logging.error("发送视频数据超时，客户端可能已断开")
+                        break
+                    except websockets.exceptions.ConnectionClosed:
+                        logging.info(f"客户端断开连接: {client_id}")
+                        break
 
                     # 添加小的延迟避免CPU占用过高
                     await asyncio.sleep(0.001)
@@ -180,9 +193,9 @@ class ScrcpyService:
                 logging.warning("ADB设备未连接，尝试连接...")
                 if not await self.adb_connect():
                     self.connection_status = self.ConnectionStatus.FAILED
-                    self.error_message = f"无法连接ADB设备: {
-                        self.device_ip}:{
-                        self.device_port}"
+                    self.error_message = (
+                        f"无法连接ADB设备: {self.device_ip}:{self.device_port}"
+                    )
                     raise RuntimeError(
                         f"无法连接ADB设备: {self.device_ip}:{self.device_port}"
                     )
@@ -204,19 +217,18 @@ class ScrcpyService:
                 f"{self.device_ip}:{self.device_port}",
                 "--no-audio",
                 "--no-window",
-                "--record",
-                "-",
-                "--record-format",
-                "mkv",
-                "-m",
-                "800",
-                "--max-fps",
-                "30",
-                "--video-bit-rate",
-                "2M",
-                "--render-driver=opengl",
+                "--record", "-",
+                "--record-format", "mkv",
+                "-m", "800",
+                "--max-fps", "30",
+                "--video-bit-rate", "4M",
+                "--video-codec", "h264",
+                "--capture-orientation", "0",
                 "--no-control",
-                "--video-codec", "h264"
+                "--render-driver=opengl",
+                "--no-playback",  # 替代--no-display，确保不显示窗口，只输出到stdout
+                "--push-target", "/data/local/tmp/",  # 指定推送目标
+                "--force-adb-forward"  # 强制ADB转发
             ]
 
             # 启动scrcpy进程
@@ -227,10 +239,7 @@ class ScrcpyService:
                 bufsize=1024 * 1024,
             )
             logging.info(
-                f"启动scrcpy服务，pid: {
-                    self.process.pid}，设备: {
-                    self.device_ip}:{
-                    self.device_port}"
+                f"启动scrcpy服务，pid: {self.process.pid}，设备: {self.device_ip}:{self.device_port}"
             )
 
             # 启动stderr处理任务
@@ -242,14 +251,16 @@ class ScrcpyService:
             logging.info(f"scrcpy进程启动检查，pid: {self.process.pid}")
             if self.process.poll() is not None:
                 raise RuntimeError(
-                    f"scrcpy进程启动失败，退出码: {
-                        self.process.returncode}")
+                    f"scrcpy进程启动失败，退出码: {self.process.returncode}"
+                )
 
             # 启动WebSocket服务器
             try:
                 logging.info(f"准备启动WebSocket服务器，监听端口: {self.ws_port}")
                 self.ws_server = await websockets.serve(
-                    self.handle_client, "0.0.0.0", self.ws_port  # nosec B104
+                    self.handle_client,
+                    "0.0.0.0",
+                    self.ws_port,  # nosec B104
                 )
             except Exception as ws_error:
                 logging.error(f"启动WebSocket服务器失败: {ws_error}")
@@ -273,8 +284,7 @@ class ScrcpyService:
                     port_allocator.release_port(allocated_port)
                     logging.info(f"已释放WebSocket端口: {allocated_port}")
                 except Exception as release_error:
-                    logging.error(
-                        f"释放端口 {allocated_port} 时出错: {release_error}")
+                    logging.error(f"释放端口 {allocated_port} 时出错: {release_error}")
             # 清理进程
             if self.process:
                 try:
@@ -301,8 +311,7 @@ class ScrcpyService:
         """停止scrcpy服务"""
         if self.running:
             logging.info(
-                f"停止scrcpy服务 (PID: {
-                    self.process.pid if self.process else 'N/A'})"
+                f"停止scrcpy服务 (PID: {self.process.pid if self.process else 'N/A'})"
             )
 
             # 关闭WebSocket服务器
@@ -433,8 +442,7 @@ class ScrcpyServiceManager:
                 }
             return services_info
 
-    async def get_service_status(
-            self, session_id: str) -> Optional[Dict[str, Any]]:
+    async def get_service_status(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取指定会话的服务状态"""
         async with self.lock:
             if session_id in self.services:

@@ -22,7 +22,7 @@ SECRET_KEY = os.getenv(
     "your-secret-key-here-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "300"))
 
 
 def normalize_username(username: str) -> str:

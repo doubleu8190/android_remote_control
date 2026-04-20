@@ -67,12 +67,12 @@ const SessionDetailPage: React.FC = () => {
       const scrcpyWsUrl = connectResult.data.websocket_url || `ws://${window.location.hostname}:8190`;
       setVideoStreamUrl(scrcpyWsUrl);
       
-      console.log('设备连接成功');
+      console.log(`获取视频流成功，URL: ${scrcpyWsUrl}`);
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '连接设备失败，请检查设备是否可用';
       setConnectionError(errorMessage);
-      console.error('设备连接失败:', error);
+      console.error('获取视频流失败:', error);
     } finally {
       setConnecting(false);
     }

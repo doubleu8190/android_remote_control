@@ -69,7 +69,6 @@ async def list_sessions(
         .limit(limit)
         .all()
     )
-    logging.info(f"获取会话列表: {db_sessions}")
 
     # 转换为响应模型
     return [session_to_response(session) for session in db_sessions]
