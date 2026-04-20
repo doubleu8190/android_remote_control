@@ -91,12 +91,6 @@ class ScrcpyService:
             logging.error(f"检查ADB设备异常: {e}")
             return False
 
-    async def handle_stderr(self):
-        """处理scrcpy进程的stderr输出"""
-        if not self.process:
-            return
-        await self._pipe_logger("scrcpy stderr", self.scrcpy_process.stderr)
-
     async def _broadcast_binary(self, payload: bytes):
         """向所有客户端发送二进制数据；慢的客户端会被剔除，避免拖垮视频读取线程"""
         if not self.clients:
@@ -143,7 +137,9 @@ class ScrcpyService:
                 chunk = await self.scrcpy_process.stdout.read(64 * 1024)
                 if not chunk:
                     break
+                logging.debug(f"scrcpy stdout 读取 {len(chunk)} 字节")
                 self.ffmpeg_process.stdin.write(chunk)
+                logging.debug(f"ffmpeg stdin 写入 {len(chunk)} 字节")
                 await self.ffmpeg_process.stdin.drain()
         except asyncio.CancelledError as e:
             logging.error(f"_pump_scrcpy_to_ffmpeg时出错: {e}")
@@ -179,8 +175,10 @@ class ScrcpyService:
                 chunk = await self.ffmpeg_process.stdout.read(4096)
                 if not chunk:
                     break
+                logging.debug(f"ffmpeg stdout 读取 {len(chunk)} 字节")
                 buf.extend(chunk)
                 if len(buf) > max_buf:
+                    logging.debug(f"视频缓冲区大小超过 {max_buf} 字节，开始丢弃旧数据")
                     # 丢弃旧数据，尝试从最近的 JPEG 头开始重新同步
                     start = buf.rfind(b"\xff\xd8")
                     if start == -1:
@@ -315,6 +313,7 @@ class ScrcpyService:
                 f"{self.device_ip}:{self.device_port}",
                 "--no-audio",
                 "--no-playback",
+                "--no-window",  # 确保不显示任何窗口
                 "--no-control",
                 "--record",
                 "/dev/stdout",
@@ -372,7 +371,9 @@ class ScrcpyService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            logging.info(f"启动ffmpeg服务，pid: {self.ffmpeg_process.pid}，设备: {self.device_ip}:{self.device_port}")
+            logging.info(
+                f"启动ffmpeg服务，pid: {self.ffmpeg_process.pid}，设备: {self.device_ip}:{self.device_port}"
+            )
             self.ffmpeg_stderr_task = asyncio.create_task(
                 self._pipe_logger("ffmpeg_stderr", self.ffmpeg_process.stderr)
             )
@@ -588,7 +589,9 @@ class ScrcpyServiceManager:
                     assert service.ws_port is not None, "scrcpy服务端口未分配"
                     return service.ws_port
                 else:
-                    logging.info(f"会话 {session_id} 的scrcpy服务已停止，移除并重新创建")
+                    logging.info(
+                        f"会话 {session_id} 的scrcpy服务已停止，移除并重新创建"
+                    )
                     # 服务已停止，移除并重新创建
                     del self.services[session_id]
 
