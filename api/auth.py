@@ -125,7 +125,7 @@ async def get_current_active_user(current_user: UserInDB = Depends(get_current_u
     """获取当前活跃用户"""
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="用户已被禁用")
-    logging.info(f"用户 {current_user} 已登录")
+    logging.info(f"用户 {current_user.username} 已登录")
     return current_user
 
 @router.post("/register", response_model=UserResponse)

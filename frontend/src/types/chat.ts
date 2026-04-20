@@ -54,6 +54,8 @@ export interface SessionResponse {
   metadata?: Record<string, any>;
   user_id?: string;
   message_count?: number;
+  device_ip?: string;
+  device_port?: number;
 }
 
 export interface MessageResponse {

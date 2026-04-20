@@ -16,7 +16,7 @@ passlib[bcrypt]==1.7.4
 # Utilities
 pydantic==2.12.0
 python-dotenv==1.0.1
-requests==2.32.3
+requests==2.32.5
 
 # Database
 sqlalchemy==2.0.38
@@ -25,3 +25,7 @@ alembic==1.15.1
 # Development
 pytest==8.3.3
 httpx==0.28.1
+
+# WebSocket and Screen Mirroring
+websockets==13.1
+pyyaml==6.0.1

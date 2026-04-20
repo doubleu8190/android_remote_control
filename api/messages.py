@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from engine.engine_manager import get_engine_for_user
@@ -149,7 +149,7 @@ async def send_message_stream(
         
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="会话不存在"
             )
     
@@ -216,9 +216,9 @@ async def send_message_stream(
         }
     )
 
-@router.get("/history/{session_id}", response_model=List[MessageResponse])
+@router.get("/history", response_model=List[MessageResponse])
 async def get_message_history(
-    session_id: str,
+    session_id: str = Query(..., description="会话ID"),
     skip: int = 0,
     limit: int = 100,
     current_user: UserInDB = Depends(get_current_active_user),
@@ -235,7 +235,7 @@ async def get_message_history(
     
     if not db_session:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="会话不存在"
         )
     
@@ -245,7 +245,7 @@ async def get_message_history(
         .order_by(DBMessage.timestamp.asc())\
         .offset(skip)\
         .limit(limit)\
-        .all()
+        .all()\
     
     # 转换为响应模型
     return [message_to_response(msg) for msg in db_messages]
@@ -268,7 +268,7 @@ async def delete_message(
     
     if not db_session:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="会话不存在"
         )
     

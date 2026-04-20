@@ -3,13 +3,14 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './components/LoginPage';
 import RegistrationPage from './components/RegistrationPage';
 import ProtectedRoute from './components/ProtectedRoute';
-import ChatLayout from './components/ChatLayout';
+import SessionManagementPage from './components/SessionManagementPage';
+import SessionDetailPage from './components/SessionDetailPage';
 
 const AppRouter: React.FC = () => {
   return (
     <Routes>
-      {/* 默认路径重定向到/chat */}
-      <Route path="/" element={<Navigate to="/chat" replace />} />
+      {/* 默认路径重定向到/sessions */}
+      <Route path="/" element={<Navigate to="/sessions" replace />} />
 
       {/* 登录页面 - 已认证用户无法访问 */}
       <Route
@@ -31,18 +32,28 @@ const AppRouter: React.FC = () => {
         }
       />
 
-      {/* 聊天主页面 - 需要认证 */}
+      {/* 会话管理页面 - 需要认证 */}
       <Route
-        path="/chat"
+        path="/sessions"
         element={
           <ProtectedRoute>
-            <ChatLayout />
+            <SessionManagementPage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 会话详情页面 - 需要认证 */}
+      <Route
+        path="/session/:sessionId"
+        element={
+          <ProtectedRoute>
+            <SessionDetailPage />
           </ProtectedRoute>
         }
       />
 
       {/* 404页面 */}
-      <Route path="*" element={<Navigate to="/chat" replace />} />
+      <Route path="*" element={<Navigate to="/sessions" replace />} />
     </Routes>
   );
 };

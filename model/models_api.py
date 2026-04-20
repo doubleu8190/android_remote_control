@@ -118,6 +118,8 @@ class MessageResponse(MessageBase):
 
 class SessionBase(BaseModel):
     title: str = "New Chat"
+    device_ip: Optional[str] = None
+    device_port: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
 
 class SessionCreate(SessionBase):
@@ -134,6 +136,8 @@ class SessionResponse(SessionBase):
 
 class SessionUpdate(BaseModel):
     title: Optional[str] = None
+    device_ip: Optional[str] = None
+    device_port: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
 
 # ==================== 聊天请求/响应 ====================

@@ -27,7 +27,7 @@ from .db_base import Base
 pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 
 # SQLite数据库文件路径
-SQLITE_DB_PATH = os.environ.get("SQLITE_DB_PATH", "/data/ai_agent.db")
+SQLITE_DB_PATH = os.environ.get("SQLITE_DB_PATH", os.path.join(os.path.dirname(__file__), "../data/ai_agent.db"))
 
 # 创建数据库目录（如果不存在）
 os.makedirs(os.path.dirname(SQLITE_DB_PATH), exist_ok=True)
