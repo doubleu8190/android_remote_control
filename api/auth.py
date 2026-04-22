@@ -149,7 +149,6 @@ async def get_current_active_user(
     """获取当前活跃用户"""
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="用户已被禁用")
-    logging.info(f"用户 {current_user.username} 已登录")
     return current_user
 
 

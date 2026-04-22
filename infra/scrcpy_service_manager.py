@@ -19,30 +19,29 @@ class Channel:
     def __init__(self, device_ip: str, device_port: int):
         self.device_ip = device_ip
         self.device_port = device_port
-        self.channel_id = None  # 视频通道ID，初始为None
 
     def __str__(self):
         return f"Channel {self.device_ip}:{self.device_port}"
 
 
 class ScrcpyServiceManager:
-    """scrcpy服务管理器"""
+    """scrcpy服务管理器（单例）"""
 
-    def __init__(self):
-        self.lock = asyncio.Lock()
-        self.ws_server: Optional[websockets.Server] = None
-        # 客户端到发送锁的映射：websocket -> asyncio.Lock
-        self.send_locks: Dict[Any, asyncio.Lock] = {}
-        # 视频通道存储：使用(ip, port)作为键，值为客户端ws实例
-        self.channel_to_clients: Dict[Channel, Set[Any]] = {}
-        # 客户端到视频通道的映射：websocket -> Channel
-        self.client_to_channel: Dict[Any, Channel] = {}
-        # 视频通道到scrcpy服务的映射：Channel -> ScrcpyService
-        self.channel_to_scrcpy: Dict[Channel, ScrcpyService] = {}
-        # 会话到客户端的映射：session_id -> websocket
-        self.session_to_clients: Dict[str, Any] = {}
-        # 客户端到会话的映射：websocket -> session_id，用于客户端异常关闭连接时，清理session_to_clients
-        self.client_to_session: Dict[Any, str] = {}
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance.running = False
+            cls._instance.lock = asyncio.Lock()
+            cls._instance.ws_server: Optional[websockets.Server] = None
+            cls._instance.send_locks: Dict[Any, asyncio.Lock] = {}
+            cls._instance.channel_to_clients: Dict[Channel, Set[Any]] = {}
+            cls._instance.client_to_channel: Dict[Any, Channel] = {}
+            cls._instance.channel_to_scrcpy: Dict[Channel, ScrcpyService] = {}
+            cls._instance.session_to_clients: Dict[str, Any] = {}
+            cls._instance.client_to_session: Dict[Any, str] = {}
+        return cls._instance
 
     async def cancelChannel(self, channel: Channel):
         """
@@ -166,19 +165,6 @@ class ScrcpyServiceManager:
         except Exception as e:
             logging.error(f"发送连接成功响应失败: {e}")
             await self.unsubscribe_channel(websocket)
-
-    async def start(self):
-        # 启动WebSocket服务器
-        try:
-            self.ws_server = await websockets.serve(
-                self.handle_client,
-                "0.0.0.0",
-                8190,
-            )
-            logging.info("WebSocket服务器启动，监听端口: 8190")
-        except Exception as ws_error:
-            logging.error(f"启动WebSocket服务器失败: {ws_error}")
-            raise RuntimeError(f"启动WebSocket服务器失败: {ws_error}")
 
     async def video_loop(
         self, scrcpy_service: ScrcpyService, ffmpeg_reader: asyncio.StreamReader
@@ -336,21 +322,42 @@ class ScrcpyServiceManager:
             service.stop()
         return None
 
-    async def stop_service(self):
-        """停止指定会话的scrcpy服务"""
-        with self.lock:
-            for client in self.client_to_channel.keys():
-                await client.close(code=1000, reason="服务准备停止")
-
-            for service in self.channel_to_service.values():
-                await service.stop()
-
     async def stop_connect_device(self, session_id: str):
         """
         停止指定设备的scrcpy服务
         """
         client = self.session_to_clients.get(session_id, None)
         self.unsubscribe_channel(client)
+
+    async def start(self):
+        with self.lock:
+            if self.running:
+                return
+            # 启动WebSocket服务器
+            try:
+                self.ws_server = await websockets.serve(
+                    self.handle_client,
+                    "0.0.0.0",
+                    8190,
+                )
+                logging.info("WebSocket服务器启动，监听端口: 8190")
+                self.running = True
+            except Exception as ws_error:
+                logging.error(f"启动WebSocket服务器失败: {ws_error}")
+                raise RuntimeError(f"启动WebSocket服务器失败: {ws_error}")
+
+    async def stop_service(self):
+        """停止指定会话的scrcpy服务"""
+        with self.lock:
+            if not self.running:
+                return
+            for client in self.client_to_channel.keys():
+                await client.close(code=1000, reason="服务准备停止")
+
+            for service in self.channel_to_service.values():
+                await service.stop()
+
+            self.running = False
 
 
 # 全局服务管理器实例

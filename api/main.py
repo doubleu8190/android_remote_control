@@ -6,8 +6,12 @@ from fastapi.security import OAuth2PasswordBearer
 from contextlib import asynccontextmanager
 from datetime import datetime
 from infra import database
+from infra.scrcpy_service_manager import scrcpy_service_manager
 import logging
 import sys
+import websockets
+from fastapi import WebSocket
+
 
 
 # 配置日志
@@ -106,6 +110,10 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+# WebSocket 路由
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    scrcpy_service_manager.handle_client(websocket)
 
 if __name__ == "__main__":
     import uvicorn

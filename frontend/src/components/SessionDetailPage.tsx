@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ChatContainer from './ChatContainer';
@@ -6,15 +6,32 @@ import VideoStreamPlayer from './VideoStreamPlayer';
 import { Message, MessageRole } from '../types/chat';
 import { chatApiService } from '../services/api';
 
+interface WebSocketRequest {
+  type: string;
+  data: {
+    device_ip: string;
+    device_port: number;
+    session_id: string;
+  };
+}
+
+interface WebSocketResponse {
+  status: boolean;
+  response: string;
+}
+
+const WS_PORT = 8190;
+
 const SessionDetailPage: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const auth = useAuth(); // eslint-disable-line @typescript-eslint/no-unused-vars
+  useAuth(); // 确保认证状态
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [videoStreamUrl, setVideoStreamUrl] = useState<string>('');
   const [connecting, setConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string>('');
+  const wsRef = useRef<WebSocket | null>(null);
 
   // 加载会话详情和消息
   const loadSessionDetails = useCallback(async () => {
@@ -57,17 +74,68 @@ const SessionDetailPage: React.FC = () => {
       setConnecting(true);
       setConnectionError('');
       
-      // 调用快速连接API
-      const connectResult = await chatApiService.connectSessionDevice(sessionId);
-      if (!connectResult.success || !connectResult.data) {
-        throw new Error(connectResult.error || '连接设备失败');
+      // 从会话数据中获取设备信息
+      const sessionResult = await chatApiService.getSession(sessionId);
+      if (!sessionResult.success || !sessionResult.data) {
+        throw new Error(sessionResult.error || '获取会话信息失败');
       }
       
-      // 更新视频流URL
-      const scrcpyWsUrl = connectResult.data.websocket_url || `ws://${window.location.hostname}:8190`;
-      setVideoStreamUrl(scrcpyWsUrl);
+      const sessionData = sessionResult.data;
+      const deviceIp = sessionData.device_ip;
+      const devicePort = sessionData.device_port;
       
-      console.log(`获取视频流成功，URL: ${scrcpyWsUrl}`);
+      if (!deviceIp || !devicePort) {
+        throw new Error('会话中未配置设备信息');
+      }
+      
+      // 初始化WebSocket连接，使用固定端口8190
+      const wsUrl = `ws://${window.location.hostname}:${WS_PORT}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+      
+      ws.onopen = () => {
+        console.log('WebSocket连接成功，发送连接设备请求');
+        
+        // 连接成功后立即发送WebSocketRequest消息
+        const request: WebSocketRequest = {
+          type: 'connect_device',
+          data: {
+            device_ip: deviceIp,
+            device_port: devicePort,
+            session_id: sessionId,
+          },
+        };
+        
+        ws.send(JSON.stringify(request));
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const response: WebSocketResponse = JSON.parse(event.data);
+          console.log('收到WebSocket响应:', response);
+          
+          if (response.status) {
+            console.log('服务端准备就绪，初始化视频渲染组件');
+            setVideoStreamUrl(wsUrl);
+          } else {
+            const errorMsg = response.response || '服务端连接失败';
+            setConnectionError(errorMsg);
+            console.error('服务端返回错误:', errorMsg);
+          }
+        } catch (parseError) {
+          console.warn('收到非JSON消息，可能是视频流数据:', event.data);
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket连接错误:', error);
+        setConnectionError('WebSocket连接失败，请确保服务端已启动');
+      };
+      
+      ws.onclose = (event) => {
+        console.log(`WebSocket连接关闭: code=${event.code}, reason=${event.reason}`);
+        wsRef.current = null;
+      };
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '连接设备失败，请检查设备是否可用';
@@ -77,6 +145,16 @@ const SessionDetailPage: React.FC = () => {
       setConnecting(false);
     }
   }, [sessionId]);
+
+  // 清理WebSocket连接
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, []);
 
   // 初始化加载
   useEffect(() => {

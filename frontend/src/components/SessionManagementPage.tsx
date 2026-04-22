@@ -129,28 +129,8 @@ const SessionManagementPage: React.FC = () => {
   };
 
   // 处理快速连接
-  const handleQuickConnect = async (sessionId: string) => {
-    try {
-      setCreatingSession(true);
-      setSessionError(null);
-
-      console.log(`正在快速连接到会话: ${sessionId}`);
-
-      // 调用快速连接API
-      const connectResult = await chatApiService.connectSessionDevice(sessionId);
-      if (!connectResult.success || !connectResult.data) {
-        throw new Error(connectResult.error || '快速连接失败');
-      }
-
-      console.log('快速连接成功');
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '快速连接失败，请检查设备是否可用';
-      setSessionError(errorMessage);
-      console.error('快速连接失败:', error);
-    } finally {
-      setCreatingSession(false);
-    }
+  const handleQuickConnect = (sessionId: string) => {
+    window.open(`/session/${sessionId}`, '_blank');
   };
 
   // 处理编辑设备

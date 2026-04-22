@@ -105,34 +105,6 @@ export class ChatApiService {
     }
   }
 
-  async listSessions(): Promise<ApiResponse<any>> {
-    try {
-      const token = localStorage.getItem('auth_token');
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      const response = await fetch(`${this.baseUrl}/sessions/`, { headers });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return {
-        success: true,
-        data,
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      console.error('Error listing sessions:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date(),
-      };
-    }
-  }
 
   async getSessions(): Promise<ApiResponse<SessionResponse[]>> {
     try {
@@ -370,76 +342,6 @@ export class ChatApiService {
       };
     } catch (error) {
       console.error('Error logging out:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date(),
-      };
-    }
-  }
-
-  async connectDevice(request?: { ip?: string; port?: number; session_id?: string }): Promise<ApiResponse<{ status: string; message: string; device_ip: string; device_port: number; websocket_url: string }>> {
-    try {
-      const token = localStorage.getItem('auth_token');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      console.log('connectDevice request:', request);
-      const response = await fetch(`${this.baseUrl}/sessions/device/connect`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(request|| {}),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return {
-        success: true,
-        data,
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      console.error('Error connecting device:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date(),
-      };
-    }
-  }
-
-  async connectSessionDevice(sessionId: string): Promise<ApiResponse<{ status: string; message: string; device_ip: string; device_port: number; websocket_url: string }>> {
-    try {
-      const token = localStorage.getItem('auth_token');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      const response = await fetch(`${this.baseUrl}/sessions/connect?session_id=${encodeURIComponent(sessionId)}`, {
-        method: 'POST',
-        headers,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return {
-        success: true,
-        data,
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      console.error('Error connecting session device:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
