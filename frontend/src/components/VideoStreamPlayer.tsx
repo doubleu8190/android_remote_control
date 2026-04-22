@@ -14,7 +14,7 @@ interface VideoStreamPlayerProps {
 }
 
 const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
-  wsUrl = `ws://${window.location.hostname}:8088`,
+  wsUrl = `ws://${window.location.hostname}:8080/ws`,
   autoConnect = true,
   onConnectionChange,
   onError,
@@ -120,6 +120,25 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
         setIsPlaying(true);
         reconnectAttempts.current = 0;
         onConnectionChange?.(true);
+        
+        // 从URL中提取设备信息并发送连接请求
+        const urlParams = new URLSearchParams(wsUrl.split('?')[1] || '');
+        const deviceIp = urlParams.get('device_ip');
+        const devicePort = urlParams.get('device_port');
+        const sessionId = urlParams.get('session_id');
+        
+        if (deviceIp && devicePort && sessionId) {
+          console.log('发送连接设备请求');
+          const request = {
+            type: 'connect_device',
+            data: {
+              device_ip: deviceIp,
+              device_port: parseInt(devicePort),
+              session_id: sessionId,
+            },
+          };
+          ws.send(JSON.stringify(request));
+        }
       };
 
       ws.onmessage = (event) => {
@@ -127,12 +146,16 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
           if (event.data instanceof ArrayBuffer) {
             processFrame(event.data);
           } else if (typeof event.data === 'string') {
-            // 处理文本消息（可能是JSON错误信息）
+            // 处理文本消息（可能是JSON响应或错误信息）
             try {
               const message = JSON.parse(event.data);
-              if (message.type === 'error') {
-                setErrorMessage(`服务器错误: ${message.message}`);
-                onError?.(`服务器错误: ${message.message}`);
+              console.log('收到WebSocket响应:', message);
+              if (message.status) {
+                console.log('服务端准备就绪，开始接收视频流');
+              } else if (message.type === 'error' || !message.status) {
+                const errorMsg = message.message || message.response || '服务端连接失败';
+                setErrorMessage(`服务器错误: ${errorMsg}`);
+                onError?.(`服务器错误: ${errorMsg}`);
                 // 延迟断开连接，让用户看到错误信息
                 setTimeout(() => {
                   if (wsRef.current === ws) {
@@ -317,11 +340,6 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
               <span className={`ml-2 ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
                 {isConnected ? '已连接' : '未连接'}
               </span>
-              {isConnected && (
-                <span className="ml-2 text-gray-400">
-                  • 分辨率: {SCRCPY_MAX_SIZE}p
-                </span>
-              )}
             </p>
           </div>
           

@@ -6,21 +6,22 @@ import VideoStreamPlayer from './VideoStreamPlayer';
 import { Message, MessageRole } from '../types/chat';
 import { chatApiService } from '../services/api';
 
-interface WebSocketRequest {
-  type: string;
-  data: {
-    device_ip: string;
-    device_port: number;
-    session_id: string;
-  };
+
+const WS_PATH = '/ws';
+
+function getWsBaseUrl(): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.hostname}:8080`;
 }
 
-interface WebSocketResponse {
-  status: boolean;
-  response: string;
+function getWsUrl(path: string): string {
+  const hostname = window.location.hostname;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${hostname}:8080${path}`;
+  }
+  return `${getWsBaseUrl()}${path}`;
 }
-
-const WS_PORT = 8190;
 
 const SessionDetailPage: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -88,54 +89,9 @@ const SessionDetailPage: React.FC = () => {
         throw new Error('会话中未配置设备信息');
       }
       
-      // 初始化WebSocket连接，使用固定端口8190
-      const wsUrl = `ws://${window.location.hostname}:${WS_PORT}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-      
-      ws.onopen = () => {
-        console.log('WebSocket连接成功，发送连接设备请求');
-        
-        // 连接成功后立即发送WebSocketRequest消息
-        const request: WebSocketRequest = {
-          type: 'connect_device',
-          data: {
-            device_ip: deviceIp,
-            device_port: devicePort,
-            session_id: sessionId,
-          },
-        };
-        
-        ws.send(JSON.stringify(request));
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const response: WebSocketResponse = JSON.parse(event.data);
-          console.log('收到WebSocket响应:', response);
-          
-          if (response.status) {
-            console.log('服务端准备就绪，初始化视频渲染组件');
-            setVideoStreamUrl(wsUrl);
-          } else {
-            const errorMsg = response.response || '服务端连接失败';
-            setConnectionError(errorMsg);
-            console.error('服务端返回错误:', errorMsg);
-          }
-        } catch (parseError) {
-          console.warn('收到非JSON消息，可能是视频流数据:', event.data);
-        }
-      };
-      
-      ws.onerror = (error) => {
-        console.error('WebSocket连接错误:', error);
-        setConnectionError('WebSocket连接失败，请确保服务端已启动');
-      };
-      
-      ws.onclose = (event) => {
-        console.log(`WebSocket连接关闭: code=${event.code}, reason=${event.reason}`);
-        wsRef.current = null;
-      };
+      // 构造WebSocket URL，包含设备信息作为查询参数
+      const wsUrl = `${getWsUrl(WS_PATH)}?device_ip=${deviceIp}&device_port=${devicePort}&session_id=${sessionId}`;
+      setVideoStreamUrl(wsUrl);
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '连接设备失败，请检查设备是否可用';
@@ -269,7 +225,7 @@ const SessionDetailPage: React.FC = () => {
                 </div>
               ) : (
                 <VideoStreamPlayer 
-                  wsUrl={videoStreamUrl || `ws://${window.location.hostname}:8190`}
+                  wsUrl={videoStreamUrl || getWsUrl(WS_PATH)}
                   autoConnect={!!videoStreamUrl}
                   onConnectionChange={(connected) => {
                     console.log(`视频流连接状态: ${connected ? '已连接' : '已断开'}`);

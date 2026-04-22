@@ -1,8 +1,9 @@
 import asyncio
 import logging
-import os
+import subprocess
 from typing import Dict
 from typing import Any
+from .fifo_allocator import fifo_allocator
 
 
 class ScrcpyService:
@@ -24,6 +25,43 @@ class ScrcpyService:
         self.ffmpeg_stderr_task: asyncio.Task | None = None
         self.pump_task: asyncio.Task | None = None
         self.video_task: asyncio.Task | None = None
+
+    async def adb_connect(self) -> bool:
+        """连接Android设备"""
+        try:
+            result = subprocess.run(
+                ["adb", "connect", f"{self.device_ip}:{self.device_port}"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0 and "connected" in result.stdout.lower():
+                logging.info(f"ADB连接成功: {self.device_ip}:{self.device_port}")
+                await asyncio.sleep(1)  # 等待连接稳定
+                return True
+            else:
+                logging.error(f"ADB连接失败: {result.stderr or result.stdout}")
+                return False
+        except Exception as e:
+            logging.error(f"ADB连接异常: {e}")
+            return False
+
+    async def check_adb_device(self) -> bool:
+        """检查ADB设备是否已连接"""
+        try:
+            result = subprocess.run(
+                "adb devices", shell=True, capture_output=True, text=True
+            )
+            logging.info(f"adb devices命令执行结果: {result.stdout}")
+            if result.returncode == 0:
+                lines = result.stdout.strip().split("\n")
+                for line in lines:
+                    if self.device_ip in line and "device" in line:
+                        logging.info(f"ADB设备已连接: {line.strip()}")
+                        return True
+            return False
+        except Exception as e:
+            logging.error(f"检查ADB设备异常: {e}")
+            return False
 
     async def handle_stderr(self, prefix: str, stream: asyncio.StreamReader | None):
         """持续读取子进程 stderr 并打印日志（不阻塞主循环）"""
@@ -52,7 +90,12 @@ class ScrcpyService:
         self.scrcpy_to_ffmpeg_fifo = (
             f"/tmp/scrcpy_to_ffmpeg_{self.device_ip}_{self.device_port}"
         )
-        os.mkfifo(self.scrcpy_to_ffmpeg_fifo)
+        await fifo_allocator.allocate_fifo(self.scrcpy_to_ffmpeg_fifo)
+
+        # 连接ADB设备
+        if not await self.adb_connect():
+            logging.error("ADB连接失败，无法启动scrcpy服务")
+            return None
 
         try:
             # 构建scrcpy命令
@@ -84,8 +127,8 @@ class ScrcpyService:
             # 启动scrcpy进程
             self.scrcpy_process = await asyncio.create_subprocess_exec(
                 *scrcpy_cmd,
-                stdout=asyncio.subprocess.STDOUT,
-                stderr=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
 
             # 检查子进程是否立即退出
@@ -96,7 +139,7 @@ class ScrcpyService:
 
             # 启动stderr处理任务
             self.scrcpy_stderr_task = asyncio.create_task(
-                self._pipe_logger("scrcpy_stderr", self.scrcpy_process.stderr)
+                self.handle_stderr("scrcpy_stderr", self.scrcpy_process.stderr)
             )
 
             logging.info(
@@ -108,7 +151,7 @@ class ScrcpyService:
                 "ffmpeg",
                 "-hide_banner",
                 "-loglevel",
-                "debug",
+                "warning",
                 "-i",
                 self.scrcpy_to_ffmpeg_fifo,
                 "-f",
@@ -125,8 +168,8 @@ class ScrcpyService:
             ]
             self.ffmpeg_process = await asyncio.create_subprocess_exec(
                 *ffmpeg_cmd,
-                stdout=asyncio.subprocess.STDOUT,
-                stderr=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
 
             # 检查子进程是否立即退出
@@ -136,13 +179,11 @@ class ScrcpyService:
                 )
 
             self.ffmpeg_stderr_task = asyncio.create_task(
-                self._pipe_logger("ffmpeg_stderr", self.ffmpeg_process.stderr)
+                self.handle_stderr("ffmpeg_stderr", self.ffmpeg_process.stderr)
             )
 
-            logging.info(f"启动ffmpeg进程，pid: {self.ffmpeg_process.pid}")
+            logging.info(f"启动ffmpeg进程，pid: {self.ffmpeg_process.pid}，读取视频流管道: {self.scrcpy_to_ffmpeg_fifo}")
 
-            # 启动视频读取与广播任务（单一读取，避免 stdout 竞争/阻塞）
-            self.video_task = asyncio.create_task(self._video_loop())
             self.running = True
 
             return self.ffmpeg_process.stdout
@@ -193,6 +234,9 @@ class ScrcpyService:
             self.video_task = None
             self.ws_port = None
             self.running = False
+            # 释放命名管道
+            fifo_allocator.release_fifo(self.scrcpy_to_ffmpeg_fifo)
+            logging.info("scrcpy服务已停止")
             raise
 
     async def stop(self):
@@ -246,6 +290,8 @@ class ScrcpyService:
                 self.pump_task = None
                 self.video_task = None
                 self.running = False
+                # 释放命名管道
+                fifo_allocator.release_fifo(self.scrcpy_to_ffmpeg_fifo)
                 logging.info("scrcpy服务已停止")
 
         except Exception as e:

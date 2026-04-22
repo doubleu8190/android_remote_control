@@ -9,7 +9,6 @@ from infra import database
 from infra.scrcpy_service_manager import scrcpy_service_manager
 import logging
 import sys
-import websockets
 from fastapi import WebSocket
 
 
@@ -40,11 +39,26 @@ async def lifespan(app: FastAPI):
         logging.error(f"❌ 数据库初始化失败: {e}")
         raise
 
+    # 启动scrcpy服务管理器
+    logging.info("正在启动scrcpy服务管理器...")
+    try:
+        await scrcpy_service_manager.start()
+        logging.info("✅ scrcpy服务管理器启动完成")
+    except Exception as e:
+        logging.error(f"❌ scrcpy服务管理器启动失败: {e}")
+        raise
+
     yield  # 应用保持运行，处理请求
 
     # -------------------
     # 【关闭阶段】应用关闭时执行
     # -------------------
+    logging.info("正在停止scrcpy服务管理器...")
+    try:
+        await scrcpy_service_manager.stop()
+        logging.info("✅ scrcpy服务管理器已停止")
+    except Exception as e:
+        logging.error(f"❌ scrcpy服务管理器停止失败: {e}")
 
 
 # 创建FastAPI应用
@@ -113,10 +127,10 @@ async def health_check():
 # WebSocket 路由
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    scrcpy_service_manager.handle_client(websocket)
+    await scrcpy_service_manager.handle_client(websocket)
 
 if __name__ == "__main__":
     import uvicorn
 
     # nosec B104: 开发环境允许绑定到所有接口，生产环境应限制
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8080)

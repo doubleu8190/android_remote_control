@@ -1,9 +1,9 @@
 import asyncio
 import logging
 import json
-import websockets
 from typing import Optional, Dict, Any, Set
 from dataclasses import asdict
+from fastapi import WebSocket
 from .scrcpy_service import ScrcpyService
 from model.models_ws import (
     WebSocketRequest,
@@ -23,6 +23,14 @@ class Channel:
     def __str__(self):
         return f"Channel {self.device_ip}:{self.device_port}"
 
+    def __hash__(self):
+        return hash((self.device_ip, self.device_port))
+
+    def __eq__(self, other):
+        if not isinstance(other, Channel):
+            return NotImplemented
+        return self.device_ip == other.device_ip and self.device_port == other.device_port
+
 
 class ScrcpyServiceManager:
     """scrcpy服务管理器（单例）"""
@@ -34,57 +42,62 @@ class ScrcpyServiceManager:
             cls._instance = super().__new__(cls)
             cls._instance.running = False
             cls._instance.lock = asyncio.Lock()
-            cls._instance.ws_server: Optional[websockets.Server] = None
-            cls._instance.send_locks: Dict[Any, asyncio.Lock] = {}
-            cls._instance.channel_to_clients: Dict[Channel, Set[Any]] = {}
-            cls._instance.client_to_channel: Dict[Any, Channel] = {}
+            cls._instance.send_locks: Dict[WebSocket, asyncio.Lock] = {}
+            cls._instance.channel_to_clients: Dict[Channel, Set[WebSocket]] = {}
+            cls._instance.client_to_channel: Dict[WebSocket, Channel] = {}
             cls._instance.channel_to_scrcpy: Dict[Channel, ScrcpyService] = {}
-            cls._instance.session_to_clients: Dict[str, Any] = {}
-            cls._instance.client_to_session: Dict[Any, str] = {}
+            cls._instance.session_to_clients: Dict[str, WebSocket] = {}
+            cls._instance.client_to_session: Dict[WebSocket, str] = {}
         return cls._instance
 
-    async def cancelChannel(self, channel: Channel):
+    async def cancel_channel(self, channel: Channel):
         """
         取消指定视频通道的订阅, 并关闭服务实例
         """
         scrcpy_service = self.channel_to_scrcpy.pop(channel, None)
         if scrcpy_service is not None and scrcpy_service.is_running():
-            scrcpy_service.stop()
+            await scrcpy_service.stop()
 
-        clients = self.channel_to_clients.get(channel, None)
+        clients = self.channel_to_clients.pop(channel, None)
         if clients is not None:
-            for websocket in clients:
-                await websocket.close(code=1000, reason="取消客户端订阅")
-                self.client_to_channel.pop(websocket)
-                session_id = self.client_to_session.pop(websocket, None)
-                self.session_to_clients.pop(session_id, None)
-            self.channel_to_clients.clear(channel)
+            for ws in clients:
+                try:
+                    await ws.close(code=1000, reason="取消客户端订阅")
+                except Exception as e:
+                    logging.error(f"关闭客户端连接时出错: {e}")
+                self.client_to_channel.pop(ws, None)
+                session_id = self.client_to_session.pop(ws, None)
+                if session_id is not None:
+                    self.session_to_clients.pop(session_id, None)
 
-    async def unsubscribe_channel(self, websocket: Any):
+    async def unsubscribe_channel(self, websocket: WebSocket):
         """
         取消客户端订阅视频通道的权限, 并关闭连接
         :param websocket: 客户端websocket实例
         """
-        with self.lock:
-            # 移除客户端到视频通道的映射
+        async with self.lock:
             channel = self.client_to_channel.pop(websocket, None)
             if channel is not None:
-                # 移除视频通道到客户端的映射
                 clients = self.channel_to_clients.get(channel)
                 if clients is not None:
-                    clients.remove(websocket)
-                    self.channel_to_clients[channel] = clients
-                if len(clients) == 0:
-                    scrcpy_service = self.channel_to_scrcpy.pop(channel, None)
-                    if scrcpy_service is not None:
-                        scrcpy_service.stop()
+                    clients.discard(websocket)
+                    if not clients:
+                        self.channel_to_clients.pop(channel, None)
+                        scrcpy_service = self.channel_to_scrcpy.pop(channel, None)
+                        if scrcpy_service is not None:
+                            await scrcpy_service.stop()
             self.send_locks.pop(websocket, None)
             session_id = self.client_to_session.pop(websocket, None)
-            self.session_to_clients.pop(session_id, None)
-            await websocket.close(code=1000, reason="取消客户端订阅")
-            logging.info(f"已取消客户端{websocket}订阅视频通道: {channel}")
+            if session_id is not None:
+                self.session_to_clients.pop(session_id, None)
 
-    async def subscribe_channel(self, websocket: Any, device_ip: str, device_port: int):
+        try:
+            await websocket.close(code=1000, reason="取消客户端订阅")
+        except Exception as e:
+            logging.error(f"关闭客户端连接时出错: {e}")
+        logging.info(f"已取消客户端{id(websocket)}订阅视频通道: {channel}")
+
+    async def subscribe_channel(self, websocket: WebSocket, device_ip: str, device_port: int):
         """
         订阅视频通道, 必要时创建服务实例
         :param websocket: 客户端websocket实例
@@ -92,55 +105,58 @@ class ScrcpyServiceManager:
         :param device_port: 设备端口号
         """
         channel = Channel(device_ip, device_port)
-        with self.lock:
+        async with self.lock:
             service = self.channel_to_scrcpy.get(channel)
             if service is None:
-                # 新的视频通道，创建服务实例, 并存储服务实例
                 service = await self.create_scrcpy_service(device_ip, device_port)
                 if service is None:
                     return
                 self.channel_to_scrcpy[channel] = service
 
-            # 存储视频通道到客户端的映射
             clients = self.channel_to_clients.get(channel)
             if clients is None:
                 clients = set()
+                self.channel_to_clients[channel] = clients
             clients.add(websocket)
-            self.channels[channel] = clients
 
-            # 存储客户端到视频通道的映射
             self.client_to_channel[websocket] = channel
 
         logging.info(
-            f"{websocket} 成功订阅视频通道 {channel} ，当前订阅数: {len(clients)}"
+            f"{id(websocket)} 成功订阅视频通道 {channel} ，当前订阅数: {len(clients)}"
         )
 
-    async def handle_connect_device(self, websocket, json_message: str):
+    async def handle_connect_device(self, websocket: WebSocket, message_data: dict):
         """
         处理连接设备请求, 并订阅视频通道
         :param websocket: 客户端websocket实例
-        :param json_message: 客户端发送的JSON消息
+        :param message_data: 客户端发送的连接设备数据（已解析的dict）
         """
         try:
-            message_dict = json.loads(json_message)
-            message = ConnectDeviceMessage(**message_dict)
+            message = ConnectDeviceMessage(**message_data)
         except Exception as e:
             logging.error(f"解析连接设备请求失败: {e}")
             return
 
         logging.info(f"收到连接设备请求: {message}")
         try:
-            # 检查会话是否已存在
             if message.session_id in self.session_to_clients:
-                await websocket.close(code=1000, reason="会话已存在，无法重复连接")
+                await websocket.send_text(
+                    json.dumps(
+                        asdict(
+                            WebSocketResponse(
+                                status=False,
+                                response="会话已存在，无法重复连接",
+                            )
+                        )
+                    )
+                )
                 return
+
             await self.subscribe_channel(
                 websocket, message.device_ip, message.device_port
             )
-            # 存储会话到客户端的映射
-            self.session_to_clients[message.session_id] = websocket
 
-            # 存储客户端到会话的映射
+            self.session_to_clients[message.session_id] = websocket
             self.client_to_session[websocket] = message.session_id
 
         except Exception as e:
@@ -149,18 +165,22 @@ class ScrcpyServiceManager:
                 status=False,
                 response=f"{message.session_id} {message.device_ip}:{message.device_port}连接失败:{e}",
             )
-            await websocket.send(
-                json.dumps(asdict(response)), ensure_ascii=False, indent=2
-            )
+            try:
+                await websocket.send_text(
+                    json.dumps(asdict(response))
+                )
+            except Exception as send_error:
+                logging.error(f"发送连接失败响应出错: {send_error}")
             await self.unsubscribe_channel(websocket)
+            return
 
         try:
             response = WebSocketResponse(
                 status=True,
                 response=f"{message.session_id} {message.device_ip}:{message.device_port}连接成功，开始传输视频流",
             )
-            await websocket.send(
-                json.dumps(asdict(response), ensure_ascii=False, indent=2)
+            await websocket.send_text(
+                json.dumps(asdict(response))
             )
         except Exception as e:
             logging.error(f"发送连接成功响应失败: {e}")
@@ -173,8 +193,8 @@ class ScrcpyServiceManager:
         从 ffmpeg 输出管道 读取 MJPEG 字节流，按 JPEG 起止标记拆帧后广播。
 
         关键点：
-        - 不能用 BufferedReader.read(4096) 这种“读满才返回”的 API，否则在数据不足时会表现为卡死；
-        - asyncio 子进程的 StreamReader.read(n) 会在“有数据可读”时尽快返回(<=n), 不会强制等满 n 字节；
+        - 不能用 BufferedReader.read(4096) 这种"读满才返回"的 API，否则在数据不足时会表现为卡死；
+        - asyncio 子进程的 StreamReader.read(n) 会在"有数据可读"时尽快返回(<=n), 不会强制等满 n 字节；
         """
 
         buf = bytearray()
@@ -184,17 +204,15 @@ class ScrcpyServiceManager:
             logging.info("开始视频读取循环")
             while self.is_running():
                 logging.debug("等待ffmpeg stdout 读取数据...")
-                # 增加超时机制，避免无限阻塞
                 try:
                     chunk = await asyncio.wait_for(
                         ffmpeg_reader.read(4096), timeout=10.0
                     )
                 except asyncio.TimeoutError:
                     logging.warning("ffmpeg stdout 读取超时，检查ffmpeg进程状态")
-                    # 检查ffmpeg进程是否还在运行
                     if not scrcpy_service.is_running():
                         logging.warning("scrcpy_service已退出")
-                        await self.cancelChannel(
+                        await self.cancel_channel(
                             Channel(
                                 scrcpy_service.device_ip, scrcpy_service.device_port
                             )
@@ -208,7 +226,6 @@ class ScrcpyServiceManager:
                 buf.extend(chunk)
                 if len(buf) > max_buf:
                     logging.debug(f"视频缓冲区大小超过 {max_buf} 字节，开始丢弃旧数据")
-                    # 丢弃旧数据，尝试从最近的 JPEG 头开始重新同步
                     start = buf.rfind(b"\xff\xd8")
                     if start == -1:
                         buf.clear()
@@ -216,13 +233,12 @@ class ScrcpyServiceManager:
                         del buf[:start]
 
                 while True:
-                    start = buf.find(b"\xff\xd8")  # SOI
+                    start = buf.find(b"\xff\xd8")
                     if start == -1:
-                        # 保留末尾 1 字节，避免 SOI 被跨 chunk 拆开
                         if len(buf) > 1:
                             del buf[:-1]
                         break
-                    end = buf.find(b"\xff\xd9", start + 2)  # EOI
+                    end = buf.find(b"\xff\xd9", start + 2)
                     if end == -1:
                         if start > 0:
                             del buf[:start]
@@ -249,19 +265,18 @@ class ScrcpyServiceManager:
         """
         clients = self.channel_to_clients.get(channel, set())
         if not clients:
-            logging.warning(f"频道 {channel} 无客户端连接")
             return
 
         logging.debug(f"广播 {len(payload)} 字节数据到频道 {channel}")
 
-        async def _safe_send(ws) -> bool:
+        async def _safe_send(ws: WebSocket) -> bool:
             try:
                 lock = self.send_locks.get(ws)
                 if lock is None:
                     lock = asyncio.Lock()
                     self.send_locks[ws] = lock
                 async with lock:
-                    await asyncio.wait_for(ws.send(payload), timeout=0.5)
+                    await asyncio.wait_for(ws.send_bytes(payload), timeout=0.5)
                 return True
             except Exception as e:
                 logging.error(f"_safe_send 异常: {e}")
@@ -270,7 +285,6 @@ class ScrcpyServiceManager:
         results = await asyncio.gather(
             *(_safe_send(ws) for ws in list(clients)), return_exceptions=True
         )
-        # 清理发送失败的连接
         for ws, ok in zip(list(clients), results):
             if ok is not True:
                 try:
@@ -278,86 +292,126 @@ class ScrcpyServiceManager:
                 except Exception as e:
                     logging.error(f"关闭客户端 {id(ws)} 连接时出错: {e}")
 
-    async def handle_client(self, websocket):
+    async def handle_client(self, websocket: WebSocket):
         """处理WebSocket客户端连接"""
+        try:
+            await websocket.accept()
+        except Exception as e:
+            logging.error(f"WebSocket握手失败: {e}")
+            return
+
         self.send_locks.setdefault(websocket, asyncio.Lock())
         message_type_handlers = {
             WebSocketRequestType.CONNECT_DEVICE: self.handle_connect_device
         }
         try:
-            async for message in websocket:
-                if isinstance(message, (bytes, bytearray)):
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    logging.info(f"客户端 {id(websocket)} 断开连接")
+                    break
+
+                if "bytes" in message:
                     logging.warning(
-                        f"收到客户端发来的二进制消息，大小: {len(message)} 字节，跳过处理"
+                        f"收到客户端发来的二进制消息，大小: {len(message['bytes'])} 字节，跳过处理"
                     )
                     continue
+
+                text_message = message.get("text")
+                if text_message is None:
+                    continue
+
                 try:
-                    obj = json.loads(message)
+                    obj = json.loads(text_message)
                     request = WebSocketRequest(**obj)
                     handler = message_type_handlers[request.type]
                     await handler(websocket, request.data)
                 except Exception as e:
-                    logging.error(f"客户端发送非法消息: {message}，解析异常: {e}")
-                    await websocket.close(
-                        code=1000,
-                        reason=f"客户端发送非法消息: {message}，解析异常: {e}",
-                    )
-                    await self.unsubscribe_channel(websocket)
+                    logging.error(f"客户端发送非法消息: {text_message}，解析异常: {e}")
+                    try:
+                        await websocket.send_text(
+                            json.dumps(
+                                asdict(
+                                    WebSocketResponse(
+                                        status=False,
+                                        response=f"非法消息: {e}",
+                                    )
+                                )
+                            )
+                        )
+                    except Exception:
+                        pass
+                    break
 
         except Exception as e:
             logging.error(f"处理客户端连接异常: {e}")
-            await websocket.close(code=1000, reason=f"处理客户端连接异常: {e}")
+        finally:
             await self.unsubscribe_channel(websocket)
 
     async def create_scrcpy_service(
         self, device_ip: str, device_port: int
-    ) -> ScrcpyService:
+    ) -> Optional[ScrcpyService]:
         """创建并启动scrcpy服务"""
         service = ScrcpyService(device_ip, device_port)
         try:
             out_fifo = await service.start()
+            if out_fifo is None:
+                return None
+            logging.info(f"scrcpy服务已启动，准备开始读取视频流: {out_fifo}")
             asyncio.create_task(self.video_loop(service, out_fifo))
+            return service
         except Exception as e:
             logging.error(f"启动scrcpy服务时发生异常: {e}")
-            service.stop()
-        return None
+            await service.stop()
+            return None
 
     async def stop_connect_device(self, session_id: str):
         """
         停止指定设备的scrcpy服务
         """
         client = self.session_to_clients.get(session_id, None)
-        self.unsubscribe_channel(client)
+        if client is not None:
+            await self.unsubscribe_channel(client)
+
+    def is_running(self) -> bool:
+        """检查管理器是否运行中"""
+        return self.running
 
     async def start(self):
-        with self.lock:
+        """启动服务管理器（标记运行状态）"""
+        async with self.lock:
             if self.running:
                 return
-            # 启动WebSocket服务器
-            try:
-                self.ws_server = await websockets.serve(
-                    self.handle_client,
-                    "0.0.0.0",
-                    8190,
-                )
-                logging.info("WebSocket服务器启动，监听端口: 8190")
-                self.running = True
-            except Exception as ws_error:
-                logging.error(f"启动WebSocket服务器失败: {ws_error}")
-                raise RuntimeError(f"启动WebSocket服务器失败: {ws_error}")
+            self.running = True
+            logging.info("scrcpy服务管理器已启动")
 
-    async def stop_service(self):
-        """停止指定会话的scrcpy服务"""
-        with self.lock:
+    async def stop(self):
+        """停止所有scrcpy服务并清理资源"""
+        async with self.lock:
             if not self.running:
                 return
-            for client in self.client_to_channel.keys():
-                await client.close(code=1000, reason="服务准备停止")
-
-            for service in self.channel_to_service.values():
-                await service.stop()
-
             self.running = False
+
+            for ws in list(self.client_to_channel.keys()):
+                try:
+                    await ws.close(code=1000, reason="服务准备停止")
+                except Exception as e:
+                    logging.error(f"关闭客户端连接时出错: {e}")
+
+            for service in self.channel_to_scrcpy.values():
+                try:
+                    await service.stop()
+                except Exception as e:
+                    logging.error(f"停止scrcpy服务时出错: {e}")
+
+            self.send_locks.clear()
+            self.channel_to_clients.clear()
+            self.client_to_channel.clear()
+            self.channel_to_scrcpy.clear()
+            self.session_to_clients.clear()
+            self.client_to_session.clear()
+
+            logging.info("scrcpy服务管理器已停止")
 
 
 # 全局服务管理器实例
