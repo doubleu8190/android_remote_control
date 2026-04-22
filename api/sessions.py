@@ -198,30 +198,17 @@ async def delete_session(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="会话不存在")
 
-    # 获取scrcpy服务会话ID
-    scrcpy_session_id = None
-    logging.info(f"数据库会话metadata: {db_session.session_metadata}")
-    if db_session.session_metadata and "scrcpy_session_id" in db_session.session_metadata:
-        scrcpy_session_id = db_session.session_metadata["scrcpy_session_id"]
-        logging.info(f"从数据库会话metadata中获取到scrcpy服务会话ID: {scrcpy_session_id}")
-    else:
-        logging.warning(
-            f"数据库会话metadata中没有scrcpy_session_id: {
-                db_session.session_metadata}")
-
+    session_id = db_session.id
     # 删除会话（关联消息将自动删除，因为设置了cascade）
     db.delete(db_session)
     db.commit()
 
     # 停止对应的scrcpy服务
-    if scrcpy_session_id:
-        try:
-            await scrcpy_service_manager.stop_service(scrcpy_session_id)
-            logging.info(f"已停止scrcpy服务会话: {scrcpy_session_id}")
-        except Exception as e:
-            logging.warning(f"停止scrcpy服务时出错: {e}")
-    else:
-        logging.info(f"会话 {session_id} 没有关联的scrcpy服务")
+    try:
+        await scrcpy_service_manager.stop_connect_device(session_id)
+        logging.info(f"已停止scrcpy服务会话: {session_id}")
+    except Exception as e:
+        logging.warning(f"停止scrcpy服务时出错: {e}")
 
     return {"message": "会话已删除"}
 
