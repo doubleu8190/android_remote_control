@@ -12,16 +12,32 @@ import sys
 from fastapi import WebSocket
 
 
+# 配置根日志器
+root_logger = logging.getLogger()
+root_logger.setLevel(getattr(logging, logging_config.get_config("logging.level", "INFO")))
 
-# 配置日志
-logging.basicConfig(
-    level=getattr(logging, logging_config.get_config("logging.level", "INFO")),
-    format=logging_config.get_config("logging.format"),
-    datefmt=logging_config.get_config("logging.datefmt"),
-    # filename=logging_config.get_config("logging.file", "app.log"),
-    stream=sys.stdout,
-    encoding=logging_config.get_config("logging.encoding", "utf-8"),
+# 清除已有的处理器
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# 添加控制台处理器
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(getattr(logging, logging_config.get_config("logging.level", "INFO")))
+formatter = logging.Formatter(
+    logging_config.get_config("logging.format"),
+    datefmt=logging_config.get_config("logging.datefmt")
 )
+console_handler.setFormatter(formatter)
+root_logger.addHandler(console_handler)
+
+# 配置子模块日志器
+for module in ['infra', 'api', 'engine']:
+    module_logger = logging.getLogger(module)
+    module_logger.setLevel(getattr(logging, logging_config.get_config("logging.level", "INFO")))
+
+# 禁用uvicorn的默认日志配置
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.error").setLevel(logging.INFO)
 
 
 # 定义生命周期
@@ -124,13 +140,21 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+
 # WebSocket 路由
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await scrcpy_service_manager.handle_client(websocket)
 
+
 if __name__ == "__main__":
     import uvicorn
 
     # nosec B104: 开发环境允许绑定到所有接口，生产环境应限制
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(
+        "api.main:app",
+        host="0.0.0.0",
+        port=8080,
+        log_level="info",
+        access_log=True,
+    )

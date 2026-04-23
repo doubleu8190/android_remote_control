@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 interface VideoStreamPlayerProps {
   /** WebSocket服务器地址 */
@@ -20,7 +20,7 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
   onError,
   className = '',
 }) => {
-  const imgRef = useRef<HTMLImageElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -31,63 +31,106 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
     bytesReceived: 0,
     connectionTime: 0,
     lastFrameTime: 0,
+    latency: 0,
   });
 
   const connectionStartTime = useRef<number>(0);
-  const frameCount = useRef<number>(0);
-  const lastFpsUpdate = useRef<number>(0);
   const bytesReceived = useRef<number>(0);
-  const lastFrameTimestamp = useRef<number>(0);
-  const currentFrameUrl = useRef<string>('');
   const reconnectAttempts = useRef<number>(0);
   const maxReconnectAttempts = 5;
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animationFrameId = useRef<number>(0);
+  const frameBuffer = useRef<ImageBitmap[]>([]);
+  const frameBufferSize = 5;
+  const processingRef = useRef<boolean>(false);
+  const renderedFrameCount = useRef<number>(0);
+  const lastRenderedFpsUpdate = useRef<number>(0);
 
-  // 清理Blob URL
-  const cleanupFrameUrl = () => {
-    if (currentFrameUrl.current) {
-      URL.revokeObjectURL(currentFrameUrl.current);
-      currentFrameUrl.current = '';
+  // 渲染视频帧
+  const renderFrame = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    if (frameBuffer.current.length > 0) {
+      const bitmap = frameBuffer.current.shift();
+      if (bitmap) {
+        // 调整画布大小以匹配视频帧
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        
+        // 绘制帧
+        ctx.drawImage(bitmap, 0, 0);
+        
+        // 释放ImageBitmap
+        bitmap.close();
+        
+        // 更新渲染帧计数
+        renderedFrameCount.current++;
+        
+        // 更新FPS统计
+        const now = Date.now();
+        if (now - lastRenderedFpsUpdate.current >= 1000) {
+          const fps = Math.round((renderedFrameCount.current * 1000) / (now - lastRenderedFpsUpdate.current));
+          
+          setStats(prev => ({
+            ...prev,
+            fps,
+          }));
+          
+          renderedFrameCount.current = 0;
+          lastRenderedFpsUpdate.current = now;
+        }
+      }
     }
-  };
+
+    animationFrameId.current = requestAnimationFrame(renderFrame);
+  }, []);
 
   // 处理JPEG帧数据
-  const processFrame = (data: ArrayBuffer) => {
+  const processFrame = useCallback((data: ArrayBuffer) => {
+    if (processingRef.current) return;
+    
+    processingRef.current = true;
+    
     try {
       bytesReceived.current += data.byteLength;
-      frameCount.current++;
 
-      // 创建Blob URL
-      cleanupFrameUrl();
-      const blob = new Blob([data], { type: 'image/jpeg' });
-      const url = URL.createObjectURL(blob);
-      currentFrameUrl.current = url;
-
-      // 更新图像
-      if (imgRef.current) {
-        imgRef.current.src = url;
-      }
-
-      // 更新统计数据
-      const now = Date.now();
-      lastFrameTimestamp.current = now;
-
-      if (now - lastFpsUpdate.current >= 1000) {
-        const fps = Math.round((frameCount.current * 1000) / (now - lastFpsUpdate.current));
-        setStats(prev => ({
-          ...prev,
-          fps,
-          bytesReceived: bytesReceived.current,
-          connectionTime: Math.floor((now - connectionStartTime.current) / 1000),
-          lastFrameTime: now,
-        }));
-        frameCount.current = 0;
-        lastFpsUpdate.current = now;
-      }
+      // 使用ImageBitmap处理帧数据
+      createImageBitmap(new Blob([data], { type: 'image/jpeg' }))
+        .then(bitmap => {
+          // 控制帧缓冲大小
+          if (frameBuffer.current.length >= frameBufferSize) {
+            const oldBitmap = frameBuffer.current.shift();
+            if (oldBitmap) oldBitmap.close();
+          }
+          
+          frameBuffer.current.push(bitmap);
+          
+          // 更新连接时间和数据接收统计
+          const now = Date.now();
+          setStats(prev => ({
+            ...prev,
+            bytesReceived: bytesReceived.current,
+            connectionTime: Math.floor((now - connectionStartTime.current) / 1000),
+            lastFrameTime: now,
+            // 延迟暂时设置为0，需要服务器支持时间戳
+            latency: 0,
+          }));
+        })
+        .catch(error => {
+          console.error('创建ImageBitmap失败:', error);
+        })
+        .finally(() => {
+          processingRef.current = false;
+        });
     } catch (error) {
       console.error('处理视频帧失败:', error);
+      processingRef.current = false;
     }
-  };
+  }, []);
 
   // 连接WebSocket
   const connectWebSocket = () => {
@@ -235,6 +278,16 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
     setConnectionStatus('disconnected');
     onConnectionChange?.(false);
     reconnectAttempts.current = maxReconnectAttempts; // 停止自动重连
+    
+    // 清空帧缓冲
+    frameBuffer.current.forEach(bitmap => bitmap.close());
+    frameBuffer.current = [];
+    
+    // 取消动画帧
+    if (animationFrameId.current) {
+      cancelAnimationFrame(animationFrameId.current);
+      animationFrameId.current = 0;
+    }
   };
 
   // 切换播放状态
@@ -264,25 +317,29 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
     // 清理函数
     return () => {
       disconnectWebSocket();
-      cleanupFrameUrl();
     };
   }, [wsUrl, autoConnect]);
 
-  // 计算延迟
-  const latency = stats.lastFrameTime ? Date.now() - stats.lastFrameTime : 0;
+  // 开始渲染循环
+  useEffect(() => {
+    if (isPlaying) {
+      animationFrameId.current = requestAnimationFrame(renderFrame);
+    }
+    
+    return () => {
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
+    };
+  }, [isPlaying, renderFrame]);
 
   return (
     <div className={`flex flex-col ${className}`}>
       {/* 视频播放区域 */}
       <div className="relative bg-gray-900 rounded-lg overflow-hidden flex-1">
-        <img
-          ref={imgRef}
+        <canvas
+          ref={canvasRef}
           className="w-full h-full object-contain bg-black"
-          alt="手机屏幕镜像"
-          onError={(e) => {
-            console.error('图像加载失败');
-            (e.target as HTMLImageElement).style.display = 'none';
-          }}
         />
         
         {/* 连接状态覆盖层 */}
@@ -318,8 +375,8 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
             </div>
             <div>
               <span className="text-gray-300">延迟: </span>
-              <span className={`font-medium ${latency > 200 ? 'text-yellow-400' : latency > 500 ? 'text-red-400' : 'text-green-400'}`}>
-                {latency}ms
+              <span className={`font-medium ${stats.latency > 200 ? 'text-yellow-400' : stats.latency > 500 ? 'text-red-400' : 'text-green-400'}`}>
+                {stats.latency}ms
               </span>
             </div>
             <div>
@@ -395,7 +452,13 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span>编码格式: MJPEG (JPEG帧流)</span>
+            <span>编码格式: MJPEG (优化处理)</span>
+          </div>
+          <div className="flex items-center mt-1">
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            <span>渲染方式: Canvas + ImageBitmap</span>
           </div>
         </div>
       </div>
@@ -403,7 +466,6 @@ const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
   );
 };
 
-// 从环境变量或默认值获取scrcpy配置
-const SCRCPY_MAX_SIZE = import.meta.env?.VITE_SCRCPY_MAX_SIZE || '800';
+
 
 export default VideoStreamPlayer;

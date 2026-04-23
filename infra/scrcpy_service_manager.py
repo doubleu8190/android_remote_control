@@ -206,7 +206,7 @@ class ScrcpyServiceManager:
                 logging.debug("等待ffmpeg stdout 读取数据...")
                 try:
                     chunk = await asyncio.wait_for(
-                        ffmpeg_reader.read(4096), timeout=10.0
+                        ffmpeg_reader.read(40960), timeout=10.0
                     )
                 except asyncio.TimeoutError:
                     logging.warning("ffmpeg stdout 读取超时，检查ffmpeg进程状态")

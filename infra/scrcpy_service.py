@@ -23,8 +23,6 @@ class ScrcpyService:
         self._send_locks: Dict[Any, asyncio.Lock] = {}
         self.scrcpy_stderr_task: asyncio.Task | None = None
         self.ffmpeg_stderr_task: asyncio.Task | None = None
-        self.pump_task: asyncio.Task | None = None
-        self.video_task: asyncio.Task | None = None
 
     async def adb_connect(self) -> bool:
         """连接Android设备"""
@@ -99,7 +97,7 @@ class ScrcpyService:
 
         try:
             # 构建scrcpy命令
-            # 不能使用 `-- record -` 会被scrcpy当作“文件名为`-`”写入磁盘，而不是写到 stdout
+            # 不能使用 `-- record -` 会被scrcpy当作"文件名为`-`"写入磁盘，而不是写到 stdout
             scrcpy_cmd = [
                 "scrcpy",
                 "-s",
@@ -189,54 +187,7 @@ class ScrcpyService:
             return self.ffmpeg_process.stdout
         except Exception as e:
             logging.error(f"启动scrcpy服务失败: {e}")
-
-            # 清理任务/进程
-            for task in [
-                self.video_task,
-                self.pump_task,
-                self.scrcpy_stderr_task,
-                self.ffmpeg_stderr_task,
-            ]:
-                if task:
-                    task.cancel()
-            for task in [
-                self.video_task,
-                self.pump_task,
-                self.scrcpy_stderr_task,
-                self.ffmpeg_stderr_task,
-            ]:
-                if task:
-                    try:
-                        await asyncio.gather(task, return_exceptions=True)
-                    except Exception as task_error:
-                        logging.error(f"取消任务时出错: {task_error}")
-            for proc in [self.scrcpy_process, self.ffmpeg_process]:
-                if proc and proc.returncode is None:
-                    try:
-                        proc.terminate()
-                        await asyncio.wait_for(proc.wait(), timeout=5)
-                    except Exception as proc_error:
-                        try:
-                            logging.error(
-                                f"终止进程时出错:{proc_error}, 强制终止: {proc.pid}"
-                            )
-                            proc.kill()
-                        except Exception as e:
-                            logging.error(f"强制终止进程时出错: {e}")
-
-            # 重置状态
-            self.scrcpy_process = None
-            self.ffmpeg_process = None
-            self.ws_server = None
-            self.scrcpy_stderr_task = None
-            self.ffmpeg_stderr_task = None
-            self.pump_task = None
-            self.video_task = None
-            self.ws_port = None
-            self.running = False
-            # 释放命名管道
-            fifo_allocator.release_fifo(self.scrcpy_to_ffmpeg_fifo)
-            logging.info("scrcpy服务已停止")
+            await self.stop()
             raise
 
     async def stop(self):
@@ -249,8 +200,6 @@ class ScrcpyService:
                 )
 
                 tasks = [
-                    self.video_task,
-                    self.pump_task,
                     self.scrcpy_stderr_task,
                     self.ffmpeg_stderr_task,
                 ]
@@ -291,7 +240,7 @@ class ScrcpyService:
                 self.video_task = None
                 self.running = False
                 # 释放命名管道
-                fifo_allocator.release_fifo(self.scrcpy_to_ffmpeg_fifo)
+                await fifo_allocator.release_fifo(self.scrcpy_to_ffmpeg_fifo)
                 logging.info("scrcpy服务已停止")
 
         except Exception as e:
