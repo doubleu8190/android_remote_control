@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any, Set
 from dataclasses import asdict
 from fastapi import WebSocket
 from .scrcpy_service import ScrcpyService
-from model.models_ws import (
+from backend.model.models_ws import (
     WebSocketRequest,
     WebSocketResponse,
     WebSocketRequestType,

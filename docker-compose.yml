@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # 后端API服务
   ai-agent-api:
-    build: .
+    build: ./backend
     container_name: ai-agent-api
     ports:
       - "8080:8000"
@@ -18,9 +18,8 @@ services:
       # 挂载数据库目录以持久化数据
       - ai-agent-data:/data
       # 开发模式：挂载源代码以便热重载
-      - ./api:/app/api
-      - ./engine:/app/engine
-      - ./service:/app/service
+      - ./backend/api:/app/api
+      - ./backend/engine:/app/engine
     networks:
       - ai-agent-network
     restart: unless-stopped

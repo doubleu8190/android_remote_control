@@ -3,16 +3,16 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from .auth import get_current_active_user, UserInDB
-from infra.database import get_db
-from model.models_db import Session as DBSession
+from backend.infra.database import get_db
+from backend.model.models_db import Session as DBSession
 import logging
 import uuid
 from pydantic import BaseModel
 
 # 导入scrcpy服务管理器
-from infra.scrcpy_service_manager import scrcpy_service_manager
+from backend.infra.scrcpy_service_manager import scrcpy_service_manager
 
-from model.models_api import (
+from backend.model.models_api import (
     SessionCreate,
     SessionResponse,
     SessionUpdate,

@@ -5,11 +5,11 @@ from passlib.context import CryptContext
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from model.models_api import (
+from backend.model.models_api import (
     UserCreate, UserResponse, Token, TokenData, UserInDB
 )
-from infra.database import get_db
-from model.models_db import User
+from backend.infra.database import get_db
+from backend.model.models_db import User
 import logging
 import os
 import uuid

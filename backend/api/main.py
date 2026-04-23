@@ -1,12 +1,12 @@
 from . import auth, sessions, messages
-from config.config_loader import logging_config
+from backend.config.config_loader import logging_config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from contextlib import asynccontextmanager
 from datetime import datetime
-from infra import database
-from infra.scrcpy_service_manager import scrcpy_service_manager
+from backend.infra import database
+from backend.infra.scrcpy_service_manager import scrcpy_service_manager
 import logging
 import sys
 from fastapi import WebSocket

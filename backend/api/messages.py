@@ -3,12 +3,12 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from engine.engine_manager import get_engine_for_user
+from backend.engine.engine_manager import get_engine_for_user
 import logging
 import json
 import uuid
 
-from model.models_api import (
+from backend.model.models_api import (
     SendMessageRequest,
     SendMessageResponse,
     MessageResponse,
@@ -16,8 +16,8 @@ from model.models_api import (
     MessageStatus
 )
 from .auth import get_current_active_user, UserInDB
-from infra.database import get_db
-from model.models_db import Session as DBSession, Message as DBMessage
+from backend.infra.database import get_db
+from backend.model.models_db import Session as DBSession, Message as DBMessage
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 

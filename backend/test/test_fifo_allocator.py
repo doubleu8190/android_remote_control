@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
 import pytest
-from infra.scrcpy_service_manager import fifo_allocator
+from backend.infra.scrcpy_service_manager import fifo_allocator
 
 
 class TestFifoAllocator:
@@ -149,7 +149,7 @@ class TestScrcpyServiceFifoIntegration:
     
     async def test_service_fifo_allocation(self):
         """测试ScrcpyService启动时分配独立管道"""
-        from infra.scrcpy_service_manager import ScrcpyService
+        from backend.infra.scrcpy_service_manager import ScrcpyService
         
         session_id = "test_service_session"
         device_ip = "192.168.1.100"  # 测试用IP，不会实际连接
@@ -178,7 +178,7 @@ class TestScrcpyServiceFifoIntegration:
     
     async def test_service_stop_releases_fifo(self):
         """测试ScrcpyService停止时释放管道资源"""
-        from infra.scrcpy_service_manager import ScrcpyService
+        from backend.infra.scrcpy_service_manager import ScrcpyService
         
         session_id = "test_service_stop_session"
         device_ip = "192.168.1.100"
@@ -210,7 +210,7 @@ class TestScrcpyServiceFifoIntegration:
     
     async def test_multiple_services_unique_fifos(self):
         """测试多个ScrcpyService实例使用不同的管道"""
-        from infra.scrcpy_service_manager import ScrcpyService
+        from backend.infra.scrcpy_service_manager import ScrcpyService
         
         services = []
         session_ids = [f"multi_service_{i}" for i in range(3)]

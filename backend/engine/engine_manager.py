@@ -1,11 +1,11 @@
 from typing import Dict, Optional
-from engine.engine import AIEngine, EngineBuilder
+from backend.engine.engine import AIEngine, EngineBuilder
 from langchain_openai import ChatOpenAI
 from langchain_community.tools import Tool
-from infra.database import get_db
-from model.models_db import Message as DBMessage
+from backend.infra.database import get_db
+from backend.model.models_db import Message as DBMessage
 # 导入配置加载器
-from config.config_loader import engine_config
+from backend.config.config_loader import engine_config
 from .middleware import monitor_tool, monitor_model
 import os
 import uuid
@@ -14,7 +14,7 @@ import logging
 
 # 导入service层（如果存在）
 try:
-    from infra.mcp_service import MCPService
+    from backend.infra.mcp_service import MCPService
 
     HAS_SERVICE_LAYER = True
 except ImportError:

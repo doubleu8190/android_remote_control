@@ -14,7 +14,7 @@ echo "🔍 检查依赖..."
 # 检查Python虚拟环境
 if [ ! -d ".venv" ]; then
     echo "❌ Python虚拟环境不存在，请先运行: python -m venv .venv"
-    echo "   然后安装依赖: source .venv/bin/activate && pip install -r requirements.txt"
+    echo "   然后安装依赖: source .venv/bin/activate && pip install -r backend/requirements.txt"
     exit 1
 fi
 
@@ -53,7 +53,7 @@ echo "🔧 启动后端API服务 (端口: 8080)..."
 cd /Users/doubleu/Documents/trae_projects/android_remote_control
 SQLITE_DB_PATH=./data/ai_agent.db \
 PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
-.venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload &
+.venv/bin/uvicorn backend.api.main:app --host 0.0.0.0 --port 8080 --reload &
 BACKEND_PID=$!
 
 echo "📊 后端PID: $BACKEND_PID"

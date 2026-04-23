@@ -70,7 +70,7 @@ def init_db():
     创建所有表并插入默认数据
     """
     # 导入模型以确保它们注册到Base.metadata
-    from model import models_db  # noqa: F401
+    from backend.model import models_db  # noqa: F401
 
     # 创建所有表
     Base.metadata.create_all(bind=engine)
@@ -79,7 +79,7 @@ def init_db():
     db = SessionLocal()
     try:
         # 检查是否已存在管理员用户
-        from model.models_db import User  # 避免循环导入
+        from backend.model.models_db import User  # 避免循环导入
 
         existing_admin = db.query(User).filter(User.username == "root").first()
         if not existing_admin:
