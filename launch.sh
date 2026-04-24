@@ -202,10 +202,9 @@ start_prod() {
     cd "$ELECTRON_DIR"
     log_info "启动生产模式..."
 
-    if [ ! -d "dist" ]; then
-        log_warning "应用未构建，开始构建..."
-        build_app
-    fi
+    rm -rf 'dist'
+    log_info "重新构建应用，开始构建..."
+    build_app
 
     echo ""
     echo -e "${YELLOW}生产模式信息:${NC}"
@@ -319,16 +318,28 @@ start_all() {
     log_success "后端服务已启动 (PID: $BACKEND_PID)"
 
     log_info "等待后端服务就绪..."
-    for i in $(seq 1 15); do
+    BACKEND_READY=false
+    for i in $(seq 1 20); do
         if curl -s http://localhost:8080/api/health > /dev/null 2>&1; then
             log_success "后端服务就绪"
+            BACKEND_READY=true
             break
         fi
-        if [ $i -eq 15 ]; then
-            log_warning "后端服务可能未完全启动，继续启动 Electron..."
+        if [ $i -eq 20 ]; then
+            log_error "后端服务启动失败，无法启动 Electron 应用"
+            log_error "请检查后端服务日志并手动启动"
+            kill $BACKEND_PID 2>/dev/null || true
+            exit 1
         fi
+        log_info "等待中 ($i/20)..."
         sleep 1
     done
+    
+    if [ "$BACKEND_READY" = false ]; then
+        log_error "后端服务启动失败"
+        kill $BACKEND_PID 2>/dev/null || true
+        exit 1
+    fi
 
     log_info "启动 Electron 应用..."
     echo ""
@@ -343,6 +354,7 @@ start_all() {
     cd "$ELECTRON_DIR"
     install_dependencies
 
+    rm -rf "dist"
     if [ ! -d "dist" ]; then
         build_app
     fi

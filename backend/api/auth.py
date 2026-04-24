@@ -167,16 +167,6 @@ async def register(
             detail="用户名已存在"
         )
 
-    # 检查邮箱是否已存在（如果提供了邮箱）
-    if user_data.email:
-        existing_email = db.query(User).filter(
-            User.email == user_data.email).first()
-        if existing_email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="邮箱已被注册"
-            )
-
     # 创建新用户
     hashed_password = get_password_hash(user_data.password)
     user_id = str(uuid.uuid4())
@@ -184,7 +174,6 @@ async def register(
     db_user = User(
         id=user_id,
         username=user_data.username,
-        email=user_data.email,
         full_name=sanitize_input(
             user_data.full_name) if user_data.full_name else None,
         hashed_password=hashed_password,
@@ -200,7 +189,6 @@ async def register(
     return UserResponse(
         id=db_user.id,
         username=db_user.username,
-        email=db_user.email,
         full_name=db_user.full_name,
         created_at=db_user.created_at,
         updated_at=db_user.updated_at

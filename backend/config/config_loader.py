@@ -65,5 +65,5 @@ class ConfigLoader:
         self._load_config()
 
 # 全局配置实例
-engine_config = ConfigLoader(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'engine_config.yaml'))
-logging_config = ConfigLoader(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'logging_config.yaml'))
+engine_config = ConfigLoader('engine_config.yaml')
+logging_config = ConfigLoader('logging_config.yaml')

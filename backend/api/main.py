@@ -1,4 +1,4 @@
-from . import auth, sessions, messages
+from . import auth, sessions, messages, llm_configs
 from backend.config.config_loader import logging_config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -104,6 +104,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 app.include_router(auth.router, tags=["authentication"])
 app.include_router(sessions.router, tags=["sessions"])
 app.include_router(messages.router, tags=["messages"])
+app.include_router(llm_configs.router, tags=["llm-configs"])
 
 
 @app.get("/")
@@ -131,6 +132,13 @@ async def root():
                 "send_stream": "POST /api/messages/send/stream",
                 "history": "GET /api/messages/history/{session_id}",
                 "delete": "DELETE /api/messages/{message_id}?session_id={session_id}",
+            },
+            "llm-configs": {
+                "list": "GET /api/llm-configs",
+                "create": "POST /api/llm-configs",
+                "get": "GET /api/llm-configs/{config_id}",
+                "update": "PUT /api/llm-configs/{config_id}",
+                "delete": "DELETE /api/llm-configs/{config_id}",
             },
         },
     }

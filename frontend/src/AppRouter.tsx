@@ -5,6 +5,8 @@ import RegistrationPage from './components/RegistrationPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import SessionManagementPage from './components/SessionManagementPage';
 import SessionDetailPage from './components/SessionDetailPage';
+import LLMManagementPage from './components/LLMManagementPage';
+import ProfilePage from './components/ProfilePage';
 
 const AppRouter: React.FC = () => {
   return (
@@ -48,6 +50,26 @@ const AppRouter: React.FC = () => {
         element={
           <ProtectedRoute>
             <SessionDetailPage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 用户信息页面 - 需要认证 */}
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <ProfilePage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* LLM管理页面 - 需要认证 */}
+      <Route
+        path="/llm"
+        element={
+          <ProtectedRoute>
+            <LLMManagementPage />
           </ProtectedRoute>
         }
       />

@@ -1,5 +1,6 @@
+from collections.abc import Set
 from datetime import datetime
-from typing import List
+from typing import Any, List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from .auth import get_current_active_user, UserInDB
@@ -21,6 +22,8 @@ from backend.model.models_api import (
 
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+active_session_store = set[Any]()
 
 
 def session_to_response(db_session: DBSession) -> SessionResponse:
@@ -45,6 +48,7 @@ def session_to_response(db_session: DBSession) -> SessionResponse:
         title=db_session.title,
         device_ip=db_session.device_ip,
         device_port=db_session.device_port,
+        llm_config_id=db_session.llm_config_id,
         messages=messages,
         created_at=db_session.created_at,
         updated_at=db_session.updated_at,
@@ -74,7 +78,7 @@ async def list_sessions(
     return [session_to_response(session) for session in db_sessions]
 
 
-@router.post("/", response_model=SessionResponse)
+@router.post("", response_model=SessionResponse)
 async def create_session(
     session_data: SessionCreate,
     current_user: UserInDB = Depends(get_current_active_user),
@@ -82,10 +86,23 @@ async def create_session(
 ):
     """创建新会话"""
     try:
-        # 使用UUID保证唯一性，不再检查重复标题（因为标题可以相同）
         session_id = str(uuid.uuid4())
 
-        # 检查是否存在相同时间戳的会话（防止重复提交）
+        existing_session = (
+            db.query(DBSession)
+            .filter(
+                DBSession.user_id == current_user.id,
+                DBSession.device_ip == session_data.device_ip,
+                DBSession.device_port == session_data.device_port,
+            )
+            .first()
+        )
+        if existing_session:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="已存在相同 IP 和端口的会话",
+            )
+
         if session_data.metadata and "timestamp" in session_data.metadata:
             existing_session = (
                 db.query(DBSession)
@@ -106,6 +123,7 @@ async def create_session(
             title=session_data.title or f"新会话 {now.strftime('%Y-%m-%d %H:%M:%S')}",
             device_ip=session_data.device_ip,
             device_port=session_data.device_port,
+            llm_config_id=session_data.llm_config_id,
             session_metadata=session_data.metadata,
             created_at=now,
             updated_at=now,
@@ -122,6 +140,82 @@ async def create_session(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建会话失败: {str(e)}",
+        )
+
+
+class SessionConnectRequest(BaseModel):
+    session_id: str
+
+
+class SessionConnectResponse(BaseModel):
+    session_id: str
+    device_ip: str
+    device_port: int
+    title: str
+    message: str
+
+
+@router.post("/connect", response_model=SessionConnectResponse)
+async def connect(
+    request: SessionConnectRequest,
+    current_user: UserInDB = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """连接设备：创建会话（DB持久化 + 内存活跃记录），返回设备IP和端口"""
+    try:
+        session_id = request.session_id
+
+        # 1. 检查数据库中是否已存在相同设备的会话
+        existing_db_session = (
+            db.query(DBSession)
+            .filter(
+                DBSession.user_id == current_user.id,
+            )
+            .first()
+        )
+        if not existing_db_session:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "SESSION_NOT_EXISTS",
+                    "message": f"设备 {session_id} 不存在会话",
+                    "session_id": existing_db_session.id,
+                },
+            )
+
+        # 2. 检查内存中是否已存在活跃会话
+        if session_id in active_session_store:
+            existing_info = active_session_store.get(session_id)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "SESSION_ALREADY_ACTIVE",
+                    "message": f"会话ID {session_id} 已存在活跃会话",
+                    "session_id": session_id,
+                    "device_ip": existing_info["device_ip"],
+                    "device_port": existing_info["device_port"],
+                },
+            )
+
+        active_session_store.add(session_id)
+        logging.info(
+            f"会话连接成功 - session_id={session_id}"
+        )
+        return SessionConnectResponse(
+            session_id=session_id,
+            device_ip=existing_db_session.device_ip,
+            device_port=existing_db_session.device_port,
+            title=existing_db_session.title,
+            message="会话连接成功",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"会话连接失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"会话连接失败: {str(e)}",
         )
 
 
@@ -202,6 +296,9 @@ async def delete_session(
     db.delete(db_session)
     db.commit()
 
+    # 从内存活跃会话存储中移除
+    active_session_store.remove(session_id)
+
     # 停止对应的scrcpy服务
     try:
         await scrcpy_service_manager.stop_connect_device(session_id)
@@ -210,12 +307,6 @@ async def delete_session(
         logging.warning(f"停止scrcpy服务时出错: {e}")
 
     return {"message": "会话已删除"}
-
-
-class DeviceConnectRequest(BaseModel):
-    ip: str
-    port: int
-    session_id: str
 
 
 @router.post("/rename")

@@ -26,7 +26,6 @@ class MessageStatus(str, Enum):
 
 class UserBase(BaseModel):
     username: str
-    email: Optional[str] = None
     full_name: Optional[str] = None
 
 
@@ -44,31 +43,13 @@ class UserCreate(UserBase):
             raise ValueError('用户名只能包含字母、数字、下划线和连字符')
         return v.strip().lower()
 
-    @field_validator('email')
-    @classmethod
-    def validate_email(cls, v: Optional[str]) -> Optional[str]:
-        if v is None or v == '':
-            return None
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        if not re.match(email_pattern, v):
-            raise ValueError('无效的邮箱格式')
-        return v.strip().lower()
-
     @field_validator('password')
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError('密码至少需要8个字符')
+        if len(v) < 6:
+            raise ValueError('密码至少需要6个字符')
         if len(v) > 128:
             raise ValueError('密码不能超过128个字符')
-        if not re.search(r'[A-Z]', v):
-            raise ValueError('密码必须包含至少一个大写字母')
-        if not re.search(r'[a-z]', v):
-            raise ValueError('密码必须包含至少一个小写字母')
-        if not re.search(r'\d', v):
-            raise ValueError('密码必须包含至少一个数字')
-        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
-            raise ValueError('密码必须包含至少一个特殊字符')
         return v
 
     @field_validator('full_name')
@@ -132,6 +113,7 @@ class SessionBase(BaseModel):
     title: str = "New Chat"
     device_ip: Optional[str] = None
     device_port: Optional[int] = None
+    llm_config_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -217,3 +199,93 @@ class MessageInDB(BaseModel):
     status: MessageStatus = MessageStatus.SENT
     timestamp: datetime = Field(default_factory=datetime.now)
     metadata: Optional[Dict[str, Any]] = None
+
+
+# ==================== LLM配置模型 ====================
+
+
+class LLMConfigBase(BaseModel):
+    base_url: str
+    model: str
+    temperature: float = Field(0.7, ge=0, le=1)
+
+
+class LLMConfigCreate(LLMConfigBase):
+    api_key: str
+
+    @field_validator('api_key')
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        if not v or len(v) < 10:
+            raise ValueError('API密钥至少需要10个字符')
+        if len(v) > 200:
+            raise ValueError('API密钥不能超过200个字符')
+        return v
+
+    @field_validator('base_url')
+    @classmethod
+    def validate_base_url(cls, v: str) -> str:
+        if not v:
+            raise ValueError('基础URL不能为空')
+        if len(v) > 200:
+            raise ValueError('基础URL不能超过200个字符')
+        # 简单的URL格式验证
+        if not re.match(r'^https?://', v):
+            raise ValueError('基础URL必须以http://或https://开头')
+        return v
+
+    @field_validator('model')
+    @classmethod
+    def validate_model(cls, v: str) -> str:
+        if not v:
+            raise ValueError('模型名称不能为空')
+        if len(v) > 100:
+            raise ValueError('模型名称不能超过100个字符')
+        return v
+
+
+class LLMConfigUpdate(BaseModel):
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = Field(None, ge=0, le=1)
+    is_active: Optional[bool] = None
+
+    @field_validator('api_key')
+    @classmethod
+    def validate_api_key(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            if len(v) < 10:
+                raise ValueError('API密钥至少需要10个字符')
+            if len(v) > 200:
+                raise ValueError('API密钥不能超过200个字符')
+        return v
+
+    @field_validator('base_url')
+    @classmethod
+    def validate_base_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            if len(v) > 200:
+                raise ValueError('基础URL不能超过200个字符')
+            # 简单的URL格式验证
+            if not re.match(r'^https?://', v):
+                raise ValueError('基础URL必须以http://或https://开头')
+        return v
+
+    @field_validator('model')
+    @classmethod
+    def validate_model(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            if len(v) > 100:
+                raise ValueError('模型名称不能超过100个字符')
+        return v
+
+
+class LLMConfigResponse(LLMConfigBase):
+    id: str
+    user_id: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

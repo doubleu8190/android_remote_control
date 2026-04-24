@@ -199,6 +199,49 @@ export class ChatApiService {
     }
   }
 
+  async connectDevice(deviceIp: string, devicePort: number): Promise<ApiResponse<{ session_id: string; device_ip: string; device_port: number; title: string; message: string }>> {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(`${this.baseUrl}/sessions/connect`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ device_ip: deviceIp, device_port: devicePort }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const errorDetail = errorData?.detail;
+        if (response.status === 409) {
+          if (typeof errorDetail === 'object' && errorDetail?.code) {
+            throw new Error(errorDetail.message || `设备 ${deviceIp}:${devicePort} 已存在会话`);
+          }
+          throw new Error(`设备 ${deviceIp}:${devicePort} 已存在会话`);
+        }
+        throw new Error(errorDetail || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        data,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      console.error('Error connecting device:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date(),
+      };
+    }
+  }
+
   async getMessages(sessionId: string): Promise<ApiResponse<MessageResponse[]>> {
     try {
       const token = localStorage.getItem('auth_token');
@@ -460,6 +503,202 @@ export class ChatApiService {
       };
     } catch (error) {
       console.error('Error registering:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  // LLM配置相关方法
+  async getLLMConfigs(): Promise<ApiResponse<any[]>> {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(`${this.baseUrl}/llm-configs`, { headers });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        data,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      console.error('Error getting LLM configs:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  async getLLMConfig(configId: string): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(`${this.baseUrl}/llm-configs/${configId}`, { headers });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        data,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      console.error('Error getting LLM config:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  async createLLMConfig(data: {
+    api_key: string;
+    base_url: string;
+    model: string;
+    temperature: number;
+  }): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(`${this.baseUrl}/llm-configs`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            // 处理Pydantic验证错误数组
+            errorMessage = errorData.detail.map((err: any) => err.msg || 'Validation error').join('\n');
+          } else if (typeof errorData.detail === 'string') {
+            // 处理普通字符串错误
+            errorMessage = errorData.detail;
+          }
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const responseData = await response.json();
+      return {
+        success: true,
+        data: responseData,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      console.error('Error creating LLM config:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  async updateLLMConfig(configId: string, data: {
+    api_key?: string;
+    base_url?: string;
+    model?: string;
+    temperature?: number;
+    is_active?: boolean;
+  }): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(`${this.baseUrl}/llm-configs/${configId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            // 处理Pydantic验证错误数组
+            errorMessage = errorData.detail.map((err: any) => err.msg || 'Validation error').join('\n');
+          } else if (typeof errorData.detail === 'string') {
+            // 处理普通字符串错误
+            errorMessage = errorData.detail;
+          }
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const responseData = await response.json();
+      return {
+        success: true,
+        data: responseData,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      console.error('Error updating LLM config:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  async deleteLLMConfig(configId: string): Promise<ApiResponse<void>> {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(`${this.baseUrl}/llm-configs/${configId}`, {
+        method: 'DELETE',
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      return {
+        success: true,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      console.error('Error deleting LLM config:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',

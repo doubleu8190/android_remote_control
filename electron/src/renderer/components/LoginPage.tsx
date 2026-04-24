@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { authApi } from '../services/authApi';
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -22,18 +23,19 @@ const LoginPage = () => {
     setLoading(true);
     setError('');
 
-    setTimeout(() => {
-      if (username === 'admin' && password === 'password') {
-        localStorage.setItem('isAuthenticated', 'true');
-        if (rememberMe) {
-          localStorage.setItem('username', username);
-        }
-        navigate('/sessions');
-      } else {
-        setError('用户名或密码错误');
+    const result = await authApi.login(username, password);
+    console.log('Login result:', JSON.stringify(result));
+    if (result.success && result.data) {
+      localStorage.setItem('auth_token', result.data.access_token);
+      localStorage.setItem('isAuthenticated', 'true');
+      if (rememberMe) {
+        localStorage.setItem('username', username);
       }
-      setLoading(false);
-    }, 1000);
+      navigate('/sessions');
+    } else {
+      setError(result.error || '用户名或密码错误');
+    }
+    setLoading(false);
   };
 
   return (
@@ -158,10 +160,10 @@ const LoginPage = () => {
           <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
             <div className="text-center">
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                演示账号：admin / password
+                请使用后端注册后的账号登录
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                这是一个演示应用，实际使用时请连接真实的后端服务
+                如果后端未运行，登录将会失败
               </p>
             </div>
           </div>

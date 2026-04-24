@@ -108,12 +108,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             setIsAuthenticated(true);
             setUser(result.data);
             setRememberMeState(credentials.rememberMe);
-            console.log('Auto-login successful');
+            console.log('Auto-login successful, user:', result.data);
           } else {
             // token无效，清除存储
             clearCredentials();
             setIsAuthenticated(false);
             setUser(null);
+            console.log('Auto-login failed, clearing credentials');
           }
         } else {
           // 检查是否有token但没有存储的凭证（非记住我模式）
@@ -125,12 +126,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             if (result.success && result.data) {
               setIsAuthenticated(true);
               setUser(result.data);
-              console.log('Session login successful');
+              console.log('Session login successful, user:', result.data);
             } else {
               // token无效，清除存储
               clearCredentials();
               setIsAuthenticated(false);
               setUser(null);
+              console.log('Session login failed, clearing credentials');
             }
           }
         }
@@ -240,17 +242,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setRememberMe,
   };
 
-  // 显示加载状态
-  if (loading && !isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-gray-600">Initializing authentication...</p>
-        </div>
-      </div>
-    );
-  }
+  // 显示加载状态 - 只在初始加载时显示，并且不阻止子组件渲染
+  // 这样设置按钮就可以在加载过程中显示
+
 
   return (
     <AuthContext.Provider value={value}>

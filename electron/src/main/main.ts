@@ -22,7 +22,7 @@ const createWindow = () => {
       preload: path.join(appDir, 'dist/main/preload.js'),
       sandbox: false, // 禁用sandbox以解决macOS上的权限问题
     },
-    icon: path.join(appDir, '../../public/icon.png'),
+    icon: path.join(appDir, 'public/icon.svg'),
   });
 
   // 加载渲染进程
@@ -60,11 +60,29 @@ const createWindow = () => {
     }
     return { action: 'allow' };
   });
+
+  // 捕获渲染进程的控制台日志
+  mainWindow.webContents.on('console-message', (_event, level: number, message: string, line: number, sourceId: string) => {
+    const timestamp = new Date().toISOString();
+    const levelMap: Record<number, string> = {
+      0: 'LOG',
+      1: 'WARNING', 
+      2: 'ERROR',
+      3: 'DEBUG'
+    };
+    const logLevel = levelMap[level] || 'UNKNOWN';
+    console.log(`[RENDERER] [${timestamp}] [${logLevel}] ${message} (${sourceId}:${line})`);
+  });
+
+  // 捕获渲染进程的未捕获异常
+  mainWindow.webContents.on('unresponsive', () => {
+    console.error('[RENDERER] 渲染进程无响应');
+  });
 };
 
 // 创建系统托盘
 const createTray = () => {
-  const iconPath = path.join(appDir, '../../public/tray-icon.png');
+  const iconPath = path.join(appDir, 'public/icon.svg');
   const trayIcon = nativeImage.createFromPath(iconPath);
   
   tray = new Tray(trayIcon.resize({ width: 16, height: 16 }));

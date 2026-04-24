@@ -4,7 +4,7 @@ SQLAlchemy数据库模型
 from typing import Any
 
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, JSON, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -51,6 +51,7 @@ class Session(Base):
     title = Column(String, default="新会话")
     device_ip = Column[str](String)  # 设备IP地址
     device_port = Column[int](Integer)  # 设备端口号
+    llm_config_id = Column(String)  # LLM配置ID
     session_metadata = Column(
         "metadata",
         JSON,
@@ -94,3 +95,29 @@ class Message(Base):
 
     def __repr__(self):
         return f"<Message(id={self.id}, role={self.role}, session_id={self.session_id})>"
+
+
+class LLMConfig(Base):
+    """LLM配置表"""
+    __tablename__ = "llm_configs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(
+        String,
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE"),
+        nullable=False)
+    api_key = Column(String, nullable=False)  # 加密存储
+    base_url = Column(String, nullable=False)
+    model = Column(String, nullable=False)
+    temperature = Column(Float, nullable=False)  # 0-1之间
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 关系
+    user = relationship("User")
+
+    def __repr__(self):
+        return f"<LLMConfig(id={self.id}, model={self.model}, user_id={self.user_id})>"

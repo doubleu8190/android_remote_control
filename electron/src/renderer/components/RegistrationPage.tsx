@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { authApi } from '../services/authApi';
 
 const RegistrationPage = () => {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,7 +17,6 @@ const RegistrationPage = () => {
     setError('');
     setSuccess('');
 
-    // 验证表单
     if (password !== confirmPassword) {
       setError('两次输入的密码不一致');
       setLoading(false);
@@ -30,19 +29,20 @@ const RegistrationPage = () => {
       return;
     }
 
-    // 简单的模拟注册逻辑
-    // 在实际应用中，这里应该调用后端API
-    setTimeout(() => {
-      // 模拟注册成功
+    const result = await authApi.register({
+      username,
+      password,
+    });
+
+    if (result.success) {
       setSuccess('注册成功！正在跳转到登录页面...');
-      
-      // 2秒后跳转到登录页面
       setTimeout(() => {
         navigate('/login');
       }, 2000);
-      
-      setLoading(false);
-    }, 1500);
+    } else {
+      setError(result.error || '注册失败，请稍后重试');
+    }
+    setLoading(false);
   };
 
   return (
@@ -98,22 +98,6 @@ const RegistrationPage = () => {
             </div>
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                邮箱地址
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors"
-                placeholder="请输入邮箱地址"
-                disabled={loading}
-                required
-              />
-            </div>
-
-            <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 密码
               </label>
@@ -148,17 +132,12 @@ const RegistrationPage = () => {
             </div>
 
             <div className="text-sm text-gray-600 dark:text-gray-400">
-              <p>密码要求：</p>
-              <ul className="list-disc pl-5 mt-1 space-y-1">
-                <li>至少6个字符</li>
-                <li>建议包含字母和数字</li>
-                <li>区分大小写</li>
-              </ul>
+              <p>密码要求：至少6个字符</p>
             </div>
 
             <button
               type="submit"
-              disabled={loading || !username || !email || !password || !confirmPassword}
+              disabled={loading || !username || !password || !confirmPassword}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
             >
               {loading ? (
@@ -190,10 +169,10 @@ const RegistrationPage = () => {
           <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
             <div className="text-center">
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                这是一个演示应用，注册功能仅用于展示
+                注册成功后可以使用新账号登录
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                实际使用时请连接真实的后端服务进行用户管理
+                如果后端未运行，注册将会失败
               </p>
             </div>
           </div>

@@ -8,40 +8,9 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute = ({ children, requireAuth = true }: ProtectedRouteProps) => {
   const location = useLocation();
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-
-  // 检查认证状态
-  useEffect(() => {
-    const checkAuth = () => {
-      // 从localStorage检查认证状态
-      const authStatus = localStorage.getItem('isAuthenticated') === 'true';
-      setIsAuthenticated(authStatus);
-    };
-
-    checkAuth();
-
-    // 监听storage变化
-    const handleStorageChange = () => {
-      checkAuth();
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, []);
-
-  // 如果还在检查认证状态，显示加载中
-  if (isAuthenticated === null) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-300">检查认证状态...</p>
-        </div>
-      </div>
-    );
-  }
+  
+  // 直接从localStorage检查认证状态，每次渲染都会重新检查
+  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
 
   // 如果需要认证但用户未登录，重定向到登录页面
   if (requireAuth && !isAuthenticated) {

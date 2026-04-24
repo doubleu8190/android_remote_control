@@ -8,13 +8,17 @@ export default defineConfig({
   build: {
     outDir: '../../dist/renderer',
     emptyOutDir: true,
-    rollupOptions: {
-      input: {
-        main: path.resolve(__dirname, 'src/renderer/index.html'),
+  },
+  plugins: [
+    react(),
+    // 移除HTML中的crossorigin属性，修复Electron file://协议下模块脚本加载失败的问题
+    {
+      name: 'remove-crossorigin',
+      transformIndexHtml(html) {
+        return html.replace(/\s*crossorigin(=["'][^"']*["'])?/g, '');
       },
     },
-  },
-  plugins: [react()],
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src/renderer'),

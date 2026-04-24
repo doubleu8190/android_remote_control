@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import SessionList from './SessionList';
 import CreateSessionModal from './CreateSessionModal';
 import { SessionResponse } from '../types/chat';
 import { chatApiService } from '../services/api';
 
 const SessionManagementPage: React.FC = () => {
+  const navigate = useNavigate();
 
   const [sessions, setSessions] = useState<SessionResponse[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
@@ -52,9 +54,8 @@ const SessionManagementPage: React.FC = () => {
     setSessionError(null);
   };
 
-  // 处理会话新建
+  // 处理设备连接：创建会话并跳转到详情页
   const handleSessionCreate = async (ip: string, port: number): Promise<boolean> => {
-    // 防止重复连接
     if (creatingSession) {
       return false;
     }
@@ -64,47 +65,29 @@ const SessionManagementPage: React.FC = () => {
     setDeviceConfig({ ip, port });
 
     try {
-      console.log(`正在创建新会话: ${ip}:${port}`);
+      console.log(`正在连接设备: ${ip}:${port}`);
 
-      // 1. 创建新的聊天会话（仅数据库持久化）
-      const now = new Date();
-      const title = `Device: ${ip}:${port} - ${now.toLocaleTimeString()}`;
-      const sessionResult = await chatApiService.createSession({
-        title: title,
-        device_ip: ip,
-        device_port: port,
-        metadata: {
-          engine: 'basic',
-          timestamp: now.getTime(),
-          connectionType: 'android_device'
-        }
-      });
+      const result = await chatApiService.connectDevice(ip, port);
 
-      if (!sessionResult.success || !sessionResult.data) {
-        throw new Error('创建聊天会话失败');
+      if (!result.success || !result.data) {
+        throw new Error(result.error || '设备连接失败');
       }
 
-      const sessionId = sessionResult.data.id;
-      console.log('会话创建成功，ID:', sessionId);
+      const { session_id, device_ip, device_port } = result.data;
+      console.log('设备连接成功，会话ID:', session_id, '设备:', `${device_ip}:${device_port}`);
 
-      if (!sessionId) {
-        return false;
-      }
-
-      // 2. 关闭模态窗口
+      // 关闭模态窗口
       setShowCreateSessionModal(false);
 
-      // 3. 触发会话列表的重新渲染操作
-      await loadSessions();
-
-      console.log('会话创建成功');
+      // 自动跳转到会话详情页
+      navigate(`/session/${session_id}`);
 
       return true;
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '创建会话失败，请检查网络设置';
+      const errorMessage = error instanceof Error ? error.message : '设备连接失败，请检查网络设置';
       setSessionError(errorMessage);
-      console.error('会话创建失败:', error);
+      console.error('设备连接失败:', error);
       return false;
     } finally {
       setCreatingSession(false);
