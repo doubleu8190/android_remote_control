@@ -706,6 +706,36 @@ export class ChatApiService {
       };
     }
   }
+
+  getScreencapUrl(sessionId: string): string {
+    const token = localStorage.getItem('auth_token');
+    const url = `${this.baseUrl}/sessions/screencap?session_id=${encodeURIComponent(sessionId)}`;
+    if (token) {
+      return `${url}&token=${encodeURIComponent(token)}`;
+    }
+    return url;
+  }
+
+  async getScreencap(sessionId: string): Promise<Blob | null> {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(
+        `${this.baseUrl}/sessions/screencap?session_id=${encodeURIComponent(sessionId)}`,
+        { headers }
+      );
+      if (!response.ok) {
+        throw new Error(`screencap error: ${response.status}`);
+      }
+      return await response.blob();
+    } catch (error) {
+      console.error('Error getting screencap:', error);
+      return null;
+    }
+  }
 }
 
 // 单例实例

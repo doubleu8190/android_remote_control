@@ -1,40 +1,19 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ChatContainer from './ChatContainer';
-import VideoStreamPlayer from './VideoStreamPlayer';
+import AdbScreenCast from './AdbScreenCast';
 import { Message, MessageRole } from '../types/chat';
 import { chatApiService } from '../services/api';
 
-
-const WS_PATH = '/ws';
-
-function getWsBaseUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.hostname}:8080`;
-}
-
-function getWsUrl(path: string): string {
-  const hostname = window.location.hostname;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${hostname}:8080${path}`;
-  }
-  return `${getWsBaseUrl()}${path}`;
-}
-
 const SessionDetailPage: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
-  useAuth(); // 确保认证状态
+  useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
-  const [videoStreamUrl, setVideoStreamUrl] = useState<string>('');
-  const [connecting, setConnecting] = useState(false);
-  const [connectionError, setConnectionError] = useState<string>('');
-  const wsRef = useRef<WebSocket | null>(null);
+  const [sessionTitle, setSessionTitle] = useState('');
 
-  // 加载会话详情和消息
   const loadSessionDetails = useCallback(async () => {
     if (!sessionId) return;
     
@@ -42,12 +21,15 @@ const SessionDetailPage: React.FC = () => {
       setLoadingMessages(true);
       setMessageError(null);
       
-      // 加载消息
+      const sessionResult = await chatApiService.getSession(sessionId);
+      if (sessionResult.success && sessionResult.data) {
+        setSessionTitle(sessionResult.data.title || '');
+      }
+
       const result = await chatApiService.getMessages(sessionId);
       
       if (result.success && result.data) {
         const messageList = Array.isArray(result.data) ? result.data : [result.data];
-        // 转换MessageResponse为Message
         const convertedMessages: Message[] = messageList.map(msg => ({
           id: msg.id,
           content: msg.content,
@@ -67,66 +49,16 @@ const SessionDetailPage: React.FC = () => {
     }
   }, [sessionId]);
 
-  // 连接设备并获取视频流
-  const connectToDevice = useCallback(async () => {
-    if (!sessionId) return;
-    
-    try {
-      setConnecting(true);
-      setConnectionError('');
-      
-      // 从会话数据中获取设备信息
-      const sessionResult = await chatApiService.getSession(sessionId);
-      if (!sessionResult.success || !sessionResult.data) {
-        throw new Error(sessionResult.error || '获取会话信息失败');
-      }
-      
-      const sessionData = sessionResult.data;
-      const deviceIp = sessionData.device_ip;
-      const devicePort = sessionData.device_port;
-      
-      if (!deviceIp || !devicePort) {
-        throw new Error('会话中未配置设备信息');
-      }
-      
-      // 构造WebSocket URL，包含设备信息作为查询参数
-      const wsUrl = `${getWsUrl(WS_PATH)}?device_ip=${deviceIp}&device_port=${devicePort}&session_id=${sessionId}`;
-      setVideoStreamUrl(wsUrl);
-      
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '连接设备失败，请检查设备是否可用';
-      setConnectionError(errorMessage);
-      console.error('获取视频流失败:', error);
-    } finally {
-      setConnecting(false);
-    }
-  }, [sessionId]);
-
-  // 清理WebSocket连接
-  useEffect(() => {
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    };
-  }, []);
-
-  // 初始化加载
   useEffect(() => {
     if (sessionId) {
       loadSessionDetails();
-      connectToDevice();
     }
-  }, [sessionId, loadSessionDetails, connectToDevice]);
-
-
+  }, [sessionId, loadSessionDetails]);
 
   const handleSendMessage = async (content: string) => {
     if (!sessionId) return;
     
     try {
-      // 添加用户消息到本地状态
       const userMessage: Message = {
         id: Date.now().toString(),
         content,
@@ -136,7 +68,6 @@ const SessionDetailPage: React.FC = () => {
       };
       setMessages(prev => [...prev, userMessage]);
       
-      // 调用API发送消息
       const result = await chatApiService.sendMessage({
         session_id: sessionId,
         message: content,
@@ -144,7 +75,6 @@ const SessionDetailPage: React.FC = () => {
       });
       
       if (result.success && result.data) {
-        // 添加AI回复到本地状态
         const aiMessage: Message = {
           id: result.data.messageId || `ai-${Date.now()}`,
           content: result.data.content,
@@ -154,9 +84,7 @@ const SessionDetailPage: React.FC = () => {
         };
         setMessages(prev => [...prev, aiMessage]);
       } else {
-        // 显示错误
         setMessageError(result.error || 'Failed to send message');
-        // 更新用户消息状态为错误
         setMessages(prev => prev.map(msg => 
           msg.id === userMessage.id ? { ...msg, status: 'error' } : msg
         ));
@@ -167,80 +95,54 @@ const SessionDetailPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* 左侧聊天区域 */}
-          <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">聊天记录</h2>
-            </div>
-            <div className="h-[700px]">
-              <ChatContainer
-                messages={messages}
-                onSendMessage={handleSendMessage}
-                isLoading={loadingMessages}
-              />
-              {messageError && (
-                <div className="mt-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg">
-                  <p className="text-sm">{messageError}</p>
-                  <button
-                    onClick={loadSessionDetails}
-                    className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
-                  >
-                    重试
-                  </button>
-                </div>
-              )}
-            </div>
+    <div className="h-full flex flex-col">
+      {sessionTitle && (
+        <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-white truncate">
+            {sessionTitle}
+          </h2>
+        </div>
+      )}
+      <div className="flex-1 flex gap-4 p-4 min-h-0">
+        <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-h-0">
+          <div className="p-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">聊天记录</h3>
           </div>
-          
-          {/* 右侧投屏区域 */}
-          <div className="w-full lg:w-1/3 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">设备投屏</h2>
-            </div>
-            <div className="h-[700px] relative">
-              {connecting ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-                  <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600 dark:text-gray-400">正在连接设备...</p>
-                  </div>
-                </div>
-              ) : connectionError ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-                  <div className="text-center p-6">
-                    <svg className="w-12 h-12 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-.633-1.964-.633-2.732 0L3.34 16c-.77.633.192 3 1.732 3z" />
-                    </svg>
-                    <p className="text-red-600 dark:text-red-400 mb-4">{connectionError}</p>
-                    <button
-                      onClick={connectToDevice}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                      重新连接
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <VideoStreamPlayer 
-                  wsUrl={videoStreamUrl || getWsUrl(WS_PATH)}
-                  autoConnect={!!videoStreamUrl}
-                  onConnectionChange={(connected) => {
-                    console.log(`视频流连接状态: ${connected ? '已连接' : '已断开'}`);
-                  }}
-                  onError={(error) => {
-                    console.error('视频流错误:', error);
-                    setConnectionError('视频流连接失败');
-                  }}
-                  className="w-full h-full"
-                />
-              )}
-            </div>
+          <div className="flex-1 min-h-0">
+            <ChatContainer
+              messages={messages}
+              onSendMessage={handleSendMessage}
+              isLoading={loadingMessages}
+            />
+            {messageError && (
+              <div className="m-3 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+                <p className="text-sm">{messageError}</p>
+                <button
+                  onClick={loadSessionDetails}
+                  className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+                >
+                  重试
+                </button>
+              </div>
+            )}
           </div>
         </div>
-      </main>
+
+        <div className="w-80 lg:w-96 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-h-0">
+          <div className="p-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">设备投屏</h3>
+          </div>
+          <div className="flex-1 min-h-0 bg-gray-900">
+            {sessionId && (
+              <AdbScreenCast
+                sessionId={sessionId}
+                className="w-full h-full"
+                maxFps={8}
+              />
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

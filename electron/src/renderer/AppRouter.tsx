@@ -1,12 +1,15 @@
-import { useState, useEffect } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import LoginPage from './components/LoginPage';
 import RegistrationPage from './components/RegistrationPage';
 import ProfilePage from './components/ProfilePage';
 import LLMManagementPage from './components/LLMManagementPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import AdbScreenCastElectron from './components/AdbScreenCastElectron';
+import MessageList from './components/MessageList';
+import MessageInput from './components/MessageInput';
 
-import { sessionApi, SessionResponse } from './services/sessionApi';
+import { sessionApi, SessionResponse, MessageResponse } from './services/sessionApi';
 import { llmConfigApi } from './services/llmConfigApi';
 
 // 会话管理页面组件
@@ -94,11 +97,24 @@ const SessionManagementPage = () => {
       setConnectingSession(session.id);
       setConnectError(null);
       console.log('开始连接设备:', session.id);
-      await sessionApi.connectSession({
-        session_id: session.id,
-      });
-      console.log('连接设备成功，导航到会话详情:', `/sessions/${session.id}`);
-      // 导航到会话详情页面
+
+      if (window.electronAPI) {
+        const result = await window.electronAPI.adbConnectDevice({
+          deviceIp: session.device_ip,
+          devicePort: session.device_port,
+        });
+        if (!result.success) {
+          throw new Error(result.error || 'ADB 连接失败');
+        }
+        console.log('ADB 直连设备成功');
+      } else {
+        await sessionApi.connectSession({
+          session_id: session.id,
+        });
+        console.log('连接设备成功');
+      }
+
+      console.log('导航到会话详情:', `/sessions/${session.id}`);
       navigate(`/sessions/${session.id}`);
     } catch (err) {
       console.error('连接设备失败:', err);
@@ -342,52 +358,145 @@ const SessionManagementPage = () => {
 
 // 会话详情页面组件
 const SessionDetailPage = () => {
+  const { id: sessionId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [session, setSession] = useState<SessionResponse | null>(null);
+  const [messages, setMessages] = useState<MessageResponse[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const loadSessionDetails = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      setLoadingMessages(true);
+      setMessageError(null);
+      const data = await sessionApi.getSession(sessionId);
+      setSession(data);
+      setMessages(data.messages || []);
+    } catch (err) {
+      console.error('加载会话详情失败:', err);
+      setMessageError('加载消息记录失败，请稍后重试');
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, [sessionId]);
+
+  const handleSendMessage = async (content: string) => {
+    if (!sessionId || sendingMessage) return;
+    try {
+      setSendingMessage(true);
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch('http://localhost:8080/api/messages/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ session_id: sessionId, message: content, stream: false }),
+      });
+
+      if (!response.ok) throw new Error('发送消息失败');
+
+      const result = await response.json();
+      const userMsg: MessageResponse = {
+        id: `user-${Date.now()}`,
+        content,
+        role: 'user',
+        status: 'sent',
+        timestamp: new Date().toISOString(),
+        session_id: sessionId,
+      };
+      const aiMsg: MessageResponse = {
+        id: result.messageId || `ai-${Date.now()}`,
+        content: result.content || '',
+        role: result.role || 'assistant',
+        status: 'delivered',
+        timestamp: result.timestamp || new Date().toISOString(),
+        session_id: sessionId,
+      };
+      setMessages(prev => [...prev, userMsg, aiMsg]);
+    } catch (err) {
+      console.error('发送消息失败:', err);
+      setMessageError('发送消息失败，请稍后重试');
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSessionDetails();
+  }, [loadSessionDetails]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">设备控制面板</h1>
-          <p className="text-gray-600 dark:text-gray-300 mt-1">实时控制Android设备</p>
-        </div>
-        <div className="flex gap-2">
-          <button className="btn-secondary">断开连接</button>
-          <button className="btn-primary">刷新画面</button>
+    <div className="h-full flex flex-col">
+      <div className="flex justify-between items-center mb-4 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/sessions')}
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+          </button>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+              {session?.title || '设备控制面板'}
+            </h1>
+            {session && (
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                {session.device_ip}:{session.device_port}
+              </p>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <div className="card p-4">
-            <div className="aspect-video bg-gray-900 rounded-lg flex items-center justify-center">
-              <div className="text-center">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-800 flex items-center justify-center">
-                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                </div>
-                <p className="text-gray-400">设备视频流未连接</p>
-                <p className="text-sm text-gray-500 mt-1">点击"刷新画面"按钮开始连接</p>
-              </div>
+      <div className="flex-1 flex gap-4 min-h-0">
+        <div className="flex-1 flex flex-col bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 min-w-0">
+          <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">聊天记录</h2>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <MessageList messages={messages} isLoading={loadingMessages} />
+            <div ref={messagesEndRef} />
+          </div>
+          {messageError && (
+            <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800">
+              <p className="text-sm text-red-600 dark:text-red-400">{messageError}</p>
+              <button onClick={loadSessionDetails} className="text-sm text-red-600 hover:underline">
+                重试
+              </button>
             </div>
+          )}
+          <div className="p-3 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+            <MessageInput onSendMessage={handleSendMessage} disabled={sendingMessage} />
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="card p-6">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">设备信息</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm text-gray-600 dark:text-gray-300">设备名称</label>
-                <p className="font-medium text-gray-900 dark:text-white">Android Device 1</p>
+        <div className="w-96 flex flex-col bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">设备投屏</h2>
+          </div>
+          <div className="flex-1 p-3 min-h-0">
+            {session ? (
+              <AdbScreenCastElectron
+                deviceIp={session.device_ip}
+                devicePort={session.device_port}
+                autoConnect={true}
+                className="w-full h-full"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+                加载设备信息中...
               </div>
-              <div>
-                <label className="text-sm text-gray-600 dark:text-gray-300">连接状态</label>
-                <div className="flex items-center">
-                  <div className="w-2 h-2 rounded-full bg-green-500 mr-2"></div>
-                  <span className="font-medium text-green-600 dark:text-green-400">已连接</span>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

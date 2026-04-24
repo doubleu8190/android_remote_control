@@ -9,6 +9,8 @@ from backend.model.models_db import Session as DBSession
 import logging
 import uuid
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+from backend.infra.adb_ctrl import screencap_async
 
 # 导入scrcpy服务管理器
 from backend.infra.scrcpy_service_manager import scrcpy_service_manager
@@ -185,7 +187,7 @@ async def connect(
 
         # 2. 检查内存中是否已存在活跃会话
         if session_id in active_session_store:
-            existing_info = active_session_store.get(session_id)
+            existing_info = active_session_store[session_id]
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -372,3 +374,45 @@ async def update_session_device(
         "device_ip": device_ip,
         "device_port": device_port,
     }
+
+
+@router.get("/screencap")
+async def screencap_endpoint(
+    session_id: str = Query(..., description="会话ID"),
+    current_user: UserInDB = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """获取设备实时截屏（adb screencap）"""
+    db_session = (
+        db.query(DBSession)
+        .filter(DBSession.id == session_id, DBSession.user_id == current_user.id)
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在"
+        )
+    if not db_session.device_ip or not db_session.device_port:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="会话未配置设备信息"
+        )
+
+    device_ip = db_session.device_ip
+    device_port = int(db_session.device_port) if db_session.device_port else 5555
+
+    png_data = await screencap_async(device_ip, device_port)
+    if png_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"无法获取设备 {device_ip}:{device_port} 截屏，请检查ADB连接",
+        )
+
+    return StreamingResponse(
+        iter([png_data]),
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )

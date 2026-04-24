@@ -21,6 +21,39 @@ declare global {
       minimizeWindow: () => void;
       maximizeWindow: () => void;
       closeWindow: () => void;
+
+      startScrcpy: (options: {
+        deviceIp: string;
+        devicePort: number;
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }) => Promise<{ success: boolean; error?: string }>;
+      stopScrcpy: () => Promise<{ success: boolean; error?: string }>;
+      moveScrcpyWindow: (options: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }) => Promise<{ success: boolean; error?: string }>;
+      getScrcpyStatus: () => Promise<{ running: boolean }>;
+
+      startAdbScreencap: (options: {
+        deviceIp: string;
+        devicePort: number;
+      }) => Promise<{ success: boolean; error?: string }>;
+      stopAdbScreencap: () => Promise<{ success: boolean; error?: string }>;
+      getAdbScreencapStatus: () => Promise<{ running: boolean }>;
+      onAdbScreencapFrame: (callback: (data: ArrayBuffer) => void) => () => void;
+
+      adbConnectDevice: (options: {
+        deviceIp: string;
+        devicePort: number;
+      }) => Promise<{ success: boolean; error?: string }>;
+
+      onMainWindowMoved: (callback: () => void) => () => void;
+      onMainWindowResized: (callback: () => void) => () => void;
     };
   }
 }

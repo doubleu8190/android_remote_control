@@ -1,0 +1,229 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+
+interface AdbScreenCastElectronProps {
+  deviceIp: string;
+  devicePort: number;
+  autoConnect?: boolean;
+  className?: string;
+}
+
+type ConnectStatus = 'disconnected' | 'connecting' | 'streaming' | 'error';
+
+const AdbScreenCastElectron: React.FC<AdbScreenCastElectronProps> = ({
+  deviceIp,
+  devicePort,
+  autoConnect = false,
+  className = '',
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [status, setStatus] = useState<ConnectStatus>('disconnected');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [stats, setStats] = useState({ fps: 0, frameBytes: 0 });
+  const cleanupRef = useRef<(() => void) | null>(null);
+  const frameCountRef = useRef<number>(0);
+  const lastFpsTimeRef = useRef<number>(0);
+  const fpsFrameCountRef = useRef<number>(0);
+  const lastFrameBytesRef = useRef<number>(0);
+  const mountedRef = useRef<boolean>(true);
+  const hasStreamedRef = useRef<boolean>(false);
+  const processingRef = useRef<boolean>(false);
+
+  const handleFrame = useCallback((data: ArrayBuffer) => {
+    if (!mountedRef.current) return;
+    if (processingRef.current) return;
+
+    processingRef.current = true;
+
+    if (!hasStreamedRef.current) {
+      hasStreamedRef.current = true;
+      setStatus('streaming');
+    }
+
+    const blob = new Blob([data], { type: 'image/png' });
+    createImageBitmap(blob).then(bitmap => {
+      if (!mountedRef.current) {
+        bitmap.close();
+        processingRef.current = false;
+        return;
+      }
+
+      const canvas = canvasRef.current;
+      if (canvas) {
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(bitmap, 0, 0);
+        }
+      }
+      bitmap.close();
+
+      frameCountRef.current++;
+      fpsFrameCountRef.current++;
+      lastFrameBytesRef.current = data.byteLength;
+
+      const now = Date.now();
+      if (now - lastFpsTimeRef.current >= 1000) {
+        setStats({
+          fps: Math.round((fpsFrameCountRef.current * 1000) / (now - lastFpsTimeRef.current)),
+          frameBytes: lastFrameBytesRef.current,
+        });
+        fpsFrameCountRef.current = 0;
+        lastFpsTimeRef.current = now;
+      }
+
+      processingRef.current = false;
+    }).catch(() => {
+      processingRef.current = false;
+    });
+  }, []);
+
+  const handleStart = useCallback(async () => {
+    if (!window.electronAPI) {
+      setErrorMessage('electronAPI 不可用，请确保在 Electron 环境中运行');
+      setStatus('error');
+      return;
+    }
+
+    setStatus('connecting');
+    setErrorMessage('');
+    hasStreamedRef.current = false;
+
+    const unsubFrame = window.electronAPI.onAdbScreencapFrame(handleFrame);
+    cleanupRef.current = unsubFrame;
+
+    try {
+      const result = await window.electronAPI.startAdbScreencap({
+        deviceIp,
+        devicePort,
+      });
+
+      if (!mountedRef.current) return;
+
+      if (result.success) {
+        lastFpsTimeRef.current = Date.now();
+        console.log(`[AdbScreenCastElectron] ADB 投屏启动成功 ${deviceIp}:${devicePort}`);
+      } else {
+        setErrorMessage(result.error || '启动 ADB 投屏失败');
+        setStatus('error');
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setErrorMessage(err instanceof Error ? err.message : '启动 ADB 投屏异常');
+        setStatus('error');
+      }
+    }
+  }, [deviceIp, devicePort, handleFrame]);
+
+  const handleStop = useCallback(async () => {
+    if (cleanupRef.current) {
+      cleanupRef.current();
+      cleanupRef.current = null;
+    }
+
+    if (window.electronAPI) {
+      await window.electronAPI.stopAdbScreencap();
+    }
+
+    setStatus('disconnected');
+    setErrorMessage('');
+    frameCountRef.current = 0;
+    fpsFrameCountRef.current = 0;
+    hasStreamedRef.current = false;
+    setStats({ fps: 0, frameBytes: 0 });
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    if (autoConnect) {
+      handleStart();
+    }
+
+    return () => {
+      mountedRef.current = false;
+      handleStop();
+    };
+  }, []);
+
+  return (
+    <div className={`relative overflow-hidden rounded-lg bg-gray-900 ${className}`}>
+      {status === 'disconnected' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+          <svg className="w-12 h-12 mb-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+          <p className="text-sm mb-3">设备投屏未连接</p>
+          <button
+            onClick={handleStart}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            启动投屏
+          </button>
+        </div>
+      )}
+
+      {status === 'connecting' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mb-3" />
+          <p className="text-sm">正在获取设备画面...</p>
+          <p className="text-xs text-gray-500 mt-1">{deviceIp}:{devicePort}</p>
+          <button
+            onClick={handleStop}
+            className="mt-4 px-3 py-1 bg-gray-700 text-gray-300 text-xs rounded hover:bg-gray-600 transition-colors"
+          >
+            取消
+          </button>
+        </div>
+      )}
+
+      {status === 'error' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+          <svg className="w-10 h-10 mb-2 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <p className="text-sm text-red-400 mb-1">连接失败</p>
+          {errorMessage && (
+            <p className="text-xs text-gray-500 mb-3 px-4 text-center max-w-full truncate">{errorMessage}</p>
+          )}
+          <button
+            onClick={handleStart}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            重试
+          </button>
+        </div>
+      )}
+
+      <canvas
+        ref={canvasRef}
+        className={`w-full h-full object-contain ${
+          status === 'streaming' ? '' : 'opacity-0 absolute inset-0 pointer-events-none'
+        }`}
+        style={{ imageRendering: 'auto' }}
+      />
+
+      {status === 'streaming' && (
+        <>
+          <div className="absolute top-2 right-2 z-10 flex gap-2">
+            <span className="px-2 py-1 bg-green-600/80 text-white text-xs rounded backdrop-blur-sm flex items-center gap-1">
+              <span className="w-1.5 h-1.5 bg-green-300 rounded-full animate-pulse" />
+              投屏中
+            </span>
+            <button
+              onClick={handleStop}
+              className="px-2 py-1 bg-red-600/80 text-white text-xs rounded hover:bg-red-700 backdrop-blur-sm transition-colors"
+            >
+              断开
+            </button>
+          </div>
+          <div className="absolute bottom-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
+            {stats.fps} FPS
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+export default AdbScreenCastElectron;
