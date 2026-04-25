@@ -543,6 +543,17 @@ async function adbScreencapLoop(win: BrowserWindow) {
   console.log(`[ADB] 投屏循环结束 ${adbScreencapDeviceIp}:${adbScreencapDevicePort}`);
 }
 
+ipcMain.handle('adb-check-server', async () => {
+  try {
+    execSync('adb start-server', { timeout: 5000 });
+    console.log('[ADB] 服务已启动');
+    return { success: true };
+  } catch (error) {
+    console.error('[ADB] 启动服务失败:', error);
+    return { success: false, error: 'ADB 服务启动失败，请确保 adb 已安装并添加到系统 PATH' };
+  }
+});
+
 ipcMain.handle('adb-connect-device', async (_event, options: { deviceIp: string; devicePort: number }) => {
   const connected = ensureAdbConnected(options.deviceIp, options.devicePort);
   if (connected) {

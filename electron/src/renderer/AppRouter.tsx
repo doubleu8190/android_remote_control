@@ -140,7 +140,7 @@ const SessionManagementPage = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-6 py-8">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">会话管理</h1>
@@ -434,7 +434,7 @@ const SessionDetailPage = () => {
   }, [messages]);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex-1 min-h-0 flex flex-col py-8">
       <div className="flex justify-between items-center mb-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <button
@@ -459,16 +459,18 @@ const SessionDetailPage = () => {
       </div>
 
       <div className="flex-1 flex gap-4 min-h-0">
-        <div className="flex-1 flex flex-col bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 min-w-0">
+        <div className="flex-1 h-[800px] flex flex-col bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 min-w-0">
           <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
             <h2 className="text-sm font-semibold text-gray-900 dark:text-white">聊天记录</h2>
           </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            <MessageList messages={messages} isLoading={loadingMessages} />
-            <div ref={messagesEndRef} />
+          <div className="flex-1 overflow-hidden">
+            <div className="h-full overflow-y-auto p-4">
+              <MessageList messages={messages} isLoading={loadingMessages} />
+              <div ref={messagesEndRef} />
+            </div>
           </div>
           {messageError && (
-            <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800">
+            <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800 flex-shrink-0">
               <p className="text-sm text-red-600 dark:text-red-400">{messageError}</p>
               <button onClick={loadSessionDetails} className="text-sm text-red-600 hover:underline">
                 重试
@@ -484,7 +486,7 @@ const SessionDetailPage = () => {
           <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
             <h2 className="text-sm font-semibold text-gray-900 dark:text-white">设备投屏</h2>
           </div>
-          <div className="flex-1 p-3 min-h-0">
+          <div className="flex-1 overflow-hidden">
             {session ? (
               <AdbScreenCastElectron
                 deviceIp={session.device_ip}
@@ -507,7 +509,7 @@ const SessionDetailPage = () => {
 // 设置页面组件
 const SettingsPage = () => {
   return (
-    <div className="space-y-6">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-6 py-8">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">设置</h1>
         <p className="text-gray-600 dark:text-gray-300 mt-1">配置应用程序偏好</p>
@@ -552,7 +554,7 @@ const AboutPage = () => {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-6 py-8">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">关于</h1>
         <p className="text-gray-600 dark:text-gray-300 mt-1">应用程序信息和版本</p>

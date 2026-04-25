@@ -90,6 +90,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('adb-screencap-frame', handler);
   },
 
+  // ADB 服务检测与启动
+  checkAdbServer: () =>
+    ipcRenderer.invoke('adb-check-server') as Promise<AdbScreencapResult>,
+
   // ADB 设备连接
   adbConnectDevice: (options: AdbScreencapStartOptions) =>
     ipcRenderer.invoke('adb-connect-device', options) as Promise<AdbScreencapResult>,
@@ -134,6 +138,7 @@ declare global {
       getAdbScreencapStatus: () => Promise<AdbScreencapStatus>;
       onAdbScreencapFrame: (callback: (data: ArrayBuffer) => void) => () => void;
 
+      checkAdbServer: () => Promise<AdbScreencapResult>;
       adbConnectDevice: (options: AdbScreencapStartOptions) => Promise<AdbScreencapResult>;
 
       onMainWindowMoved: (callback: () => void) => () => void;

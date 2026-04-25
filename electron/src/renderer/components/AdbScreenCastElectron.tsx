@@ -89,6 +89,24 @@ const AdbScreenCastElectron: React.FC<AdbScreenCastElectronProps> = ({
     setErrorMessage('');
     hasStreamedRef.current = false;
 
+    try {
+      const serverResult = await window.electronAPI.checkAdbServer();
+      if (!mountedRef.current) return;
+
+      if (!serverResult.success) {
+        setErrorMessage(serverResult.error || 'ADB 服务启动失败');
+        setStatus('error');
+        return;
+      }
+      console.log('[AdbScreenCastElectron] ADB 服务已就绪');
+    } catch (err) {
+      if (mountedRef.current) {
+        setErrorMessage(err instanceof Error ? err.message : '检测 ADB 服务异常');
+        setStatus('error');
+      }
+      return;
+    }
+
     const unsubFrame = window.electronAPI.onAdbScreencapFrame(handleFrame);
     cleanupRef.current = unsubFrame;
 

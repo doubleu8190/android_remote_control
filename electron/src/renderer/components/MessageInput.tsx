@@ -31,7 +31,8 @@ const MessageInput = ({ onSendMessage, disabled }: MessageInputProps) => {
     const textarea = textareaRef.current;
     if (textarea) {
       textarea.style.height = 'auto';
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+      const maxHeight = window.innerHeight * 0.5;
+      textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
     }
   };
 
@@ -45,9 +46,9 @@ const MessageInput = ({ onSendMessage, disabled }: MessageInputProps) => {
           onKeyDown={handleKeyDown}
           onInput={handleInput}
           placeholder="输入消息... (Shift+Enter换行)"
-          className="flex-1 min-h-[44px] max-h-[200px] resize-none rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 min-h-[100px] max-h-[50vh] resize-none overflow-y-auto rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           disabled={disabled}
-          rows={1}
+          rows={3}
         />
         <button
           onClick={handleSend}

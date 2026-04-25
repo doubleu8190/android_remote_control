@@ -74,7 +74,7 @@ const ProfilePage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-6 py-8">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">用户信息</h1>
         <p className="text-gray-600 dark:text-gray-300 mt-1">查看和管理您的账户信息</p>

@@ -47,6 +47,7 @@ declare global {
       getAdbScreencapStatus: () => Promise<{ running: boolean }>;
       onAdbScreencapFrame: (callback: (data: ArrayBuffer) => void) => () => void;
 
+      checkAdbServer: () => Promise<{ success: boolean; error?: string }>;
       adbConnectDevice: (options: {
         deviceIp: string;
         devicePort: number;
@@ -295,8 +296,8 @@ function App() {
     <Router>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
         <Header />
-        <main className="flex-1 overflow-hidden">
-          <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8 flex-1 min-h-0">
+        <main className="flex-1 overflow-hidden flex flex-col">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex-1 min-h-0 flex flex-col w-full overflow-hidden">
             <AppRouter />
           </div>
         </main>

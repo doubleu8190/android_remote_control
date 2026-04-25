@@ -299,7 +299,7 @@ async def delete_session(
     db.commit()
 
     # 从内存活跃会话存储中移除
-    active_session_store.remove(session_id)
+    active_session_store.discard(session_id)
 
     # 停止对应的scrcpy服务
     try:
