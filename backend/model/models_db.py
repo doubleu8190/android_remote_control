@@ -2,6 +2,7 @@
 SQLAlchemy数据库模型
 """
 from typing import Any
+from enum import Enum
 
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, JSON, Float
@@ -12,6 +13,24 @@ import uuid
 
 # 从共享基础模块导入Base
 from backend.infra.db_base import Base
+
+
+# ==================== 枚举类型 ====================
+
+
+class MessageRole(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+    TOOL = "tool"
+
+
+class MessageStatus(str, Enum):
+    SENDING = "sending"
+    SENT = "sent"
+    DELIVERED = "delivered"
+    READ = "read"
+    ERROR = "error"
 
 
 class User(Base):

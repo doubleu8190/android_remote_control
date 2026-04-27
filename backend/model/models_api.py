@@ -1,25 +1,10 @@
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from enum import Enum
 import uuid
 import re
 
-# ==================== 枚举类型 ====================
-
-
-class MessageRole(str, Enum):
-    USER = "user"
-    ASSISTANT = "assistant"
-    SYSTEM = "system"
-
-
-class MessageStatus(str, Enum):
-    SENDING = "sending"
-    SENT = "sent"
-    DELIVERED = "delivered"
-    READ = "read"
-    ERROR = "error"
+from backend.model.models_db import MessageRole, MessageStatus
 
 # ==================== 请求/响应模型 ====================
 

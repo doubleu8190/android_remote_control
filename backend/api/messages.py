@@ -9,11 +9,10 @@ from backend.model.models_api import (
     SendMessageRequest,
     SendMessageResponse,
     MessageResponse,
-    MessageRole,
 )
 from .auth import get_current_active_user, UserInDB
 from backend.infra.database import get_db
-from backend.model.models_db import Session as DBSession, Message as DBMessage
+from backend.model.models_db import Session as DBSession, Message as DBMessage, MessageRole
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
@@ -31,6 +30,20 @@ def message_to_response(db_message: DBMessage) -> MessageResponse:
     )
 
 
+def _get_validated_session(db: Session, session_id: str, user_id: str) -> DBSession:
+    """验证会话存在且属于当前用户"""
+    db_session = (
+        db.query(DBSession)
+        .filter(DBSession.id == session_id, DBSession.user_id == user_id)
+        .first()
+    )
+    if not db_session:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在"
+        )
+    return db_session
+
+
 @router.post("/send", response_model=SendMessageResponse)
 async def send_message(
     request: SendMessageRequest,
@@ -46,17 +59,7 @@ async def send_message(
             status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在，请先创建会话"
         )
 
-    # 验证会话存在且属于当前用户
-    db_session = (
-        db.query(DBSession)
-        .filter(DBSession.id == session_id, DBSession.user_id == current_user.id)
-        .first()
-    )
-
-    if not db_session:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在"
-        )
+    db_session = _get_validated_session(db, session_id, current_user.id)
 
     # 获取AI引擎并生成响应
     try:
@@ -102,17 +105,7 @@ async def get_message_history(
     db: Session = Depends(get_db),
 ):
     """获取会话的消息历史"""
-    # 验证会话存在且属于当前用户
-    db_session = (
-        db.query(DBSession)
-        .filter(DBSession.id == session_id, DBSession.user_id == current_user.id)
-        .first()
-    )
-
-    if not db_session:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在"
-        )
+    _get_validated_session(db, session_id, current_user.id)
 
     # 查询消息，按时间顺序排列
     db_messages = (
@@ -135,17 +128,7 @@ async def delete_message(
     db: Session = Depends(get_db),
 ):
     """删除消息"""
-    # 验证会话存在且属于当前用户
-    db_session = (
-        db.query(DBSession)
-        .filter(DBSession.id == session_id, DBSession.user_id == current_user.id)
-        .first()
-    )
-
-    if not db_session:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="会话不存在"
-        )
+    _get_validated_session(db, session_id, current_user.id)
 
     # 查找消息
     db_message = (

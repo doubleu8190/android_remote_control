@@ -2,9 +2,8 @@ from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
 from sqlalchemy.orm import Session
 from typing import List
-from backend.model.models_db import Message as DBMessage
 from datetime import datetime
-from backend.model.models_api import MessageStatus
+from backend.model.models_db import Message as DBMessage, MessageStatus, MessageRole
 
 
 
@@ -16,7 +15,7 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
         self.db_session = db_session
 
     @property
-    def langchain_messages(self) -> List[BaseMessage]:  # 1️⃣ 核心接口：从DB加载消息
+    def messages(self) -> List[BaseMessage]:  # 1️⃣ 核心接口：从DB加载消息
         """从数据库中加载当前会话的所有消息，并转换为LangChain的消息格式。"""
         db_messages = (
             self.db_session.query(DBMessage)
@@ -33,18 +32,18 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
         return langchain_messages
 
     def convert_db_message_to_langchain(self, db_message: DBMessage) -> BaseMessage:
-        """将数据库中的Message对象转换为LangChain的BaseMessage对象。"""
         role = db_message.role.lower()
         content = db_message.content
-        
-        if role == 'user' or role == 'human':
+
+        if role == MessageRole.USER.value:
             return HumanMessage(content=content)
-        elif role == 'assistant' or role == 'ai':
+        elif role == MessageRole.ASSISTANT.value:
             return AIMessage(content=content)
-        elif role == 'system':
+        elif role == MessageRole.SYSTEM.value:
             return SystemMessage(content=content)
+        elif role == MessageRole.TOOL.value:
+            return ToolMessage(content=content)
         else:
-            # 默认为人类消息
             return HumanMessage(content=content)
 
     @property
@@ -79,19 +78,17 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
         ).delete()
         self.db_session.commit()
 
-    def _get_role(self, message: BaseMessage) -> str:
-        """将LangChain消息类型映射到数据库role字段。"""
-        
+    def _get_role(self, message: BaseMessage) -> MessageRole:
         if isinstance(message, HumanMessage):
-            return 'user'
+            return MessageRole.USER
         elif isinstance(message, AIMessage):
-            return 'assistant'
+            return MessageRole.ASSISTANT
         elif isinstance(message, SystemMessage):
-            return 'system'
+            return MessageRole.SYSTEM
         elif isinstance(message, ToolMessage):
-            return 'tool'
+            return MessageRole.TOOL
         else:
-            return 'user'
+            return MessageRole.USER
 
     # 以下两个方法是LangChain的完整接口定义通常需要的，提供基本实现即可。
     def __len__(self):
