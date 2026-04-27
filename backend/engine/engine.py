@@ -7,7 +7,11 @@ from langchain_core.language_models import BaseLanguageModel
 from langchain_core.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
-from typing import List, Dict
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
+from ..infra.session_history_manager import session_history_manager
+from typing import Any, List, Dict
 import os
 import logging
 
@@ -19,197 +23,101 @@ class AIEngine:
     AI引擎：协调用户输入、系统指令和历史对话
     """
 
-    def __init__(self, llm: BaseLanguageModel, tools: List[BaseTool] = None,
-                 history: List[Dict[str, str]] = None, system_prompt_file: str = None):
+    def __init__(
+        self,
+        session_id: str,
+        llm: BaseLanguageModel,
+        tools: List[BaseTool] = None,
+        history: List[Dict[str, str]] = None,
+        system_prompt_file: str = None,
+    ):
+        self.session_id = session_id
         self.llm = llm
         self.tools = tools or []
-        self.history: List[Dict[str, str]] = history or []  # 简单的历史记录
+        self.tool_by_name = {tool.name: tool for tool in tools}
+        self.system_instruction: str = ""
+        self.prompt: ChatPromptTemplate = None
+        self.conversation: RunnableWithMessageHistory = None
+        self.config: Dict[str, Any] = None
+        self.initialized = False
 
-        # 从外部文件读取系统提示词
-        if system_prompt_file and os.path.exists(system_prompt_file):
-            try:
-                with open(system_prompt_file, 'r', encoding='utf-8') as f:
-                    self.system_instruction = f.read().strip()
-                logging.info(f"成功从文件加载系统提示词: {system_prompt_file}")
-            except Exception as e:
-                logging.error(f"读取系统提示词文件失败: {e}")
-                self.system_instruction = "你是一个AI助手，需要根据用户的输入和历史对话来生成响应。必要时可以使用工具来获取信息。"
-        else:
-            self.system_instruction = "你是一个AI助手，需要根据用户的输入和历史对话来生成响应。必要时可以使用工具来获取信息。"
-
-    def _format_history(self) -> str:
-        """格式化历史对话"""
-        if not self.history:
-            return "无历史对话"
-
-        formatted = []
-        for msg in self.history:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            formatted.append(f"{role}: {content}")
-
-        return "\n".join(formatted)
-
-    def _format_tools(self) -> str:
-        """格式化工具描述"""
-        if not self.tools:
-            return "无可用工具"
-
-        tool_descs = []
-        for i, tool in enumerate(self.tools):
-            tool_descs.append(f"{i + 1}. {tool.name}: {tool.description}")
-
-        return "\n".join(tool_descs)
-
-    def _create_prompt(self, user_input: str) -> ChatPromptTemplate:
-        """创建提示模板"""
-        history = self._format_history()
-        tools = self._format_tools()
-
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", self.system_instruction),
-            ("system", f"历史对话:\n{history}"),
-            ("system", f"可用工具:\n{tools}"),
-            ("system", "请以JSON格式输出你的响应，确保输出是有效的JSON字符串。"),
-            ("human", user_input)
-        ])
-
-        return prompt
-
-    def _call_tool(self, tool_name: str, tool_input: str) -> str:
-        """调用工具"""
-        for tool in self.tools:
-            if tool.name == tool_name:
-                try:
-                    result = tool.invoke(tool_input)
-                    return str(result)
-                except Exception as e:
-                    return f"工具调用错误: {str(e)}"
-
-        return f"未找到工具: {tool_name}"
-
-    def _extract_tool_calls(self, response: str) -> List[Dict[str, str]]:
+    def initialize(self):
         """
-        从响应中提取工具调用（简化版）
-        预期格式: { "content": "你的回复", "tool": "tool name", "tool_args": ["arg1", "arg2"] }
+        初始化会话历史
         """
-        tool_calls = []
-        lines = response.split('\n')
-        for line in lines:
-            if line.startswith("TOOL:"):
-                parts = line.split("INPUT:")
-                if len(parts) == 2:
-                    tool_name = parts[0].replace("TOOL:", "").strip()
-                    tool_input = parts[1].strip()
-                    tool_calls.append({
-                        "tool_name": tool_name,
-                        "tool_input": tool_input
-                    })
-        return tool_calls
+        if self.initialized:
+            return
 
-    def run(self, user_input: str) -> str:
+        # 1. 定义提示模板，包含历史消息的占位符
+        self.prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", self.system_instruction),
+                MessagesPlaceholder(variable_name="history"),
+                ("human", "{user_input}"),
+            ]
+        )
+
+        # 2. 创建链
+        chain = self.prompt | self.llm | output_parser
+
+        # 3. 使用RunnableWithMessageHistory包装链条，注入历史管理能力
+        self.conversation = RunnableWithMessageHistory(
+            runnable=chain,
+            get_session_history=session_history_manager.get_session_history,
+            input_messages_key="input",
+            history_messages_key="history",
+        )
+
+        # 4. 传递会话ID到模型调用
+        self.config = {"configurable": {"session_id": self.session_id}}
+
+        # 5. 绑定工具到模型
+        # 注意：这需要在模型初始化后调用，否则会报错
+        self.llm = self.llm.bind_tools(self.tools)
+
+        self.initialized = True
+
+    def call_tool(self, tc: Any) -> ToolMessage:
+        tool_name = tc["name"]
+        tool_args = tc["args"]
+        try:
+            tool_result = self.tool_by_name[tool_name].invoke(tool_args)
+        except Exception as e:
+            tool_result = f"工具调用失败：{str(e)}"
+        return ToolMessage(content=tool_result, tool_call_id=tc["id"], name=tool_name)
+
+    def chat(self, user_input: str) -> str:
         """
         运行引擎，处理用户输入并返回响应
         """
+        self.initialize()
 
-        # 创建提示
-        prompt = self._create_prompt(user_input)
+        history = session_history_manager.get_session_history(self.session_id)
 
-        # 创建链
-        chain = prompt | self.llm | output_parser
+        # 1.进行带记忆的对话
+        response = self.conversation.invoke({"input": user_input}, config=self.config)
+        logging.info(f"llm response:{response.content}")
+        history.add_message(response)
+        
+        # 2. 检查是否有 tool_calls
+        while response.tool_calls:
+            # 对于每个 tool_call，执行工具并创建 ToolMessage
+            for tc in response.tool_calls:
+                tool_msg = self.call_tool(tc)
+                # 将 ToolMessage 直接添加到历史中
+                history.add_message(tool_msg)
 
-        try:
-            # 获取初始响应
-            response = chain.invoke({})
-            logging.info(f"初始响应: {response}")
-            # 添加用户输入到历史
-            self.history.append({"role": "user", "content": user_input})
+            # 重新调用模型，将工具结果纳入上下文
+            # 注意：此时需要传入空输入，或者再次使用 conversation 但带一个空字符串
+            # 由于 conversation 期望输入字典，我们直接调用 chain 并传入当前完整历史
+            new_response = self.conversation.invoke(
+                {
+                    "input": "",  # 没有新用户输入
+                },
+                config=self.config,
+            )
+            # 将新的 AI 消息（可能还有更多 tool_calls 或最终答案）存入历史
+            history.add_message(new_response)
+            response = new_response
 
-            # 检查是否需要工具调用
-            tool_calls = self._extract_tool_calls(response)
-
-            if tool_calls:
-                # 处理工具调用
-                tool_results = []
-                for tool_call in tool_calls:
-                    tool_name = tool_call["tool_name"]
-                    tool_input = tool_call["tool_input"]
-                    result = self._call_tool(tool_name, tool_input)
-                    tool_results.append(f"{tool_name}: {result}")
-
-                # 创建包含工具结果的提示
-                tool_results_str = "\n".join(tool_results)
-                followup_prompt = ChatPromptTemplate.from_messages([
-                    ("system", self.system_instruction),
-                    ("system", f"历史对话:\n{self._format_history()}"),
-                    ("human", user_input),
-                    ("ai", response),
-                    ("system", f"工具执行结果:\n{tool_results_str}"),
-                    ("human", "请基于工具执行结果生成最终响应")
-                ])
-
-                followup_chain = followup_prompt | self.llm | StrOutputParser()
-                final_response = followup_chain.invoke({})
-
-                # 添加AI响应到历史
-                self.history.append(
-                    {"role": "assistant", "content": final_response})
-                return final_response
-            else:
-                # 添加AI响应到历史
-                self.history.append({"role": "assistant", "content": response})
-                return response
-
-        except Exception as e:
-            error_msg = f"引擎处理错误: {str(e)}"
-            return error_msg
-
-    def add_tool(self, tool: BaseTool) -> None:
-        """添加工具"""
-        self.tools.append(tool)
-
-    def clear_history(self) -> None:
-        """清除历史对话"""
-        self.history.clear()
-
-    def get_history(self) -> List[Dict[str, str]]:
-        """获取历史对话"""
-        return self.history.copy()
-
-
-class EngineBuilder:
-    """
-    引擎构建器，用于配置和创建AIEngine实例
-    """
-
-    def __init__(self):
-        self.llm = None
-        self.tools = []
-        self.system_prompt_file = None
-
-    def with_llm(self, llm: BaseLanguageModel) -> 'EngineBuilder':
-        self.llm = llm
-        return self
-
-    def with_tool(self, tool: BaseTool) -> 'EngineBuilder':
-        self.tools.append(tool)
-        return self
-
-    def with_tools(self, tools: List[BaseTool]) -> 'EngineBuilder':
-        self.tools.extend(tools)
-        return self
-
-    def with_history(self, history: List[Dict[str, str]]) -> 'EngineBuilder':
-        self.history = history
-        return self
-
-    def with_system_prompt_file(
-            self, system_prompt_file: str) -> 'EngineBuilder':
-        self.system_prompt_file = system_prompt_file
-        return self
-
-    def build(self) -> AIEngine:
-        if not self.llm:
-            raise ValueError("LLM必须提供")
-        return AIEngine(llm=self.llm, tools=self.tools, history=self.history,
-                        system_prompt_file=self.system_prompt_file)
+        return response.content
