@@ -98,6 +98,9 @@ install_dependencies() {
     cd "$ELECTRON_DIR"
     log_info "检查依赖..."
 
+    check_node_version
+    check_npm
+
     if [ ! -d "node_modules" ]; then
         log_warning "依赖未安装，开始安装..."
         npm install
@@ -244,8 +247,8 @@ start_backend() {
     log_info "启动 Python 后端服务..."
 
     PROJECT_ROOT="$SCRIPT_DIR"
-    VENV_DIR="$PROJECT_ROOT/.venv"
-    DATA_DIR="$PROJECT_ROOT/data"
+    VENV_DIR="$PROJECT_ROOT/backend/.venv"
+    DATA_DIR="$PROJECT_ROOT/backend/data"
 
     PYTHON_CMD=""
     if command -v python3 &> /dev/null; then
@@ -370,9 +373,6 @@ start_all() {
 
 main() {
     show_banner
-
-    check_node_version
-    check_npm
 
     MODE=${1:-"dev"}
 

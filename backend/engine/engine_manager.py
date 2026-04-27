@@ -1,5 +1,6 @@
 import os
 from typing import Dict, List
+from sqlalchemy.orm import Session
 from backend.engine.engine import AIEngine
 from langchain_openai import ChatOpenAI
 from langchain_community.tools import Tool
@@ -9,6 +10,7 @@ from backend.model.models_db import Message as DBMessage
 from backend.config.config_loader import engine_config
 from .middleware import monitor_tool, monitor_model
 from backend.model.models_db import Session as DBSession
+from backend.infra.session_history_manager import session_history_manager
 import logging
 
 
@@ -43,18 +45,21 @@ class AIEngineManager:
         if session_id in self.session_to_engine:
             del self.session_to_engine[session_id]
 
-    def get_or_create_engine(self, session: DBSession) -> AIEngine | None:
+    def get_or_create_engine(self, session: DBSession, db_session: Session = None) -> AIEngine | None:
         """获取会话特定的AI引擎"""
         engine = self.session_to_engine.get(session.id)
         if not engine:
-            engine = self.create_engine(session)
+            engine = self.create_engine(session, db_session)
         return engine
 
     def create_engine(
-        self, session: DBSession
+        self, session: DBSession, db_session: Session = None
     ) -> AIEngine | None:
         """获取或创建会话特定的AI引擎"""
         try:
+            # 确保会话历史管理器已初始化
+            if db_session:
+                session_history_manager.create_session_history(session.id, db_session)
             # 从配置文件获取LLM配置
             openai_config = engine_config.get_config("llm.openai", {})
             base_llm = ChatOpenAI(
@@ -72,6 +77,7 @@ class AIEngineManager:
             
             # 创建引擎
             engine = AIEngine(
+                session_id=session.id,
                 llm=base_llm,
                 tools=base_tools,
                 system_prompt=system_prompt,
@@ -79,8 +85,7 @@ class AIEngineManager:
             self.session_to_engine[session.id] = engine
             return engine
         except Exception as e:
-            logging.error(f"ChatOpenAI 初始化失败: {e}，将使用回退LLM")
-            self._create_fallback_llm()
+            logging.error(f"ChatOpenAI 初始化失败: {e}")
             return None
 
     def create_tools(self, session: DBSession) -> List[Tool]:
@@ -106,17 +111,6 @@ class AIEngineManager:
                 "你是一个AI助手，需要根据用户的输入和历史对话来生成响应。\n"
                 "请以JSON格式输出你的响应。"
             )
-
-    def _create_fallback_llm(self):
-        """创建回退LLM（当主LLM初始化失败时）"""
-        # 创建一个简单的回退LLM
-        from langchain_community.llms import FakeListLLM
-
-        responses = ["这是一个示例响应。AI引擎初始化失败，请检查配置。"]
-        self.base_llm = FakeListLLM(responses=responses)
-        self.base_tools = []
-        self.initialized = True
-        logging.info("已为用户创建回退LLM")
 
 
 engine_manager = AIEngineManager()

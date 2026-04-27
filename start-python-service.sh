@@ -10,7 +10,7 @@ echo "=========================================="
 
 # 脚本所在目录即为项目根目录
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="$SCRIPT_DIR/.venv"
+VENV_DIR="$SCRIPT_DIR/backend/.venv"
 API_DIR="$SCRIPT_DIR/backend/api"
 DATA_DIR="$SCRIPT_DIR/data"
 

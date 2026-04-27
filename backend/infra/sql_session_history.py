@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from backend.model.models_db import Message as DBMessage
 from datetime import datetime
-from backend.model.models_db import MessageStatus
+from backend.model.models_api import MessageStatus
 
 
 

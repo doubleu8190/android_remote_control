@@ -4,14 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from backend.engine.engine_manager import engine_manager
 import logging
-import uuid
 
 from backend.model.models_api import (
     SendMessageRequest,
     SendMessageResponse,
     MessageResponse,
     MessageRole,
-    MessageStatus,
 )
 from .auth import get_current_active_user, UserInDB
 from backend.infra.database import get_db
@@ -61,8 +59,13 @@ async def send_message(
         )
 
     # 获取AI引擎并生成响应
-    engine = engine_manager.get_or_create_engine(db_session)
     try:
+        engine = engine_manager.get_or_create_engine(db_session, db)
+        if not engine:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="AI引擎初始化失败",
+            )
         ai_response = engine.chat(request.message)
     except Exception as e:
         raise HTTPException(
@@ -70,23 +73,18 @@ async def send_message(
             detail=f"AI处理错误: {str(e)}",
         )
 
-    # 保存AI响应到数据库
-    ai_message_id = str(uuid.uuid4())
-    ai_message = DBMessage(
-        id=ai_message_id,
-        session_id=session_id,
-        content=ai_response,
-        role=MessageRole.ASSISTANT,
-        status=MessageStatus.SENT,
-        timestamp=datetime.now(),
-    )
-    db.add(ai_message)
-    db.commit()
-    db.refresh(ai_message)
-
+    # 获取最新一条 AI 消息的 ID（由 RunnableWithMessageHistory 自动写入）
+    db_message = (
+        db.query(DBMessage)
+        .filter(
+            DBMessage.session_id == session_id,
+            DBMessage.role == MessageRole.ASSISTANT,
+        )
+        .order_by(DBMessage.timestamp.desc())
+    ).first()
     # 构建响应
     return SendMessageResponse(
-        message_id=ai_message_id,
+        message_id=db_message.id if db_message else "",
         content=ai_response,
         role=MessageRole.ASSISTANT,
         timestamp=datetime.now(),
@@ -98,8 +96,8 @@ async def send_message(
 @router.get("/history", response_model=List[MessageResponse])
 async def get_message_history(
     session_id: str = Query(..., description="会话ID"),
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     current_user: UserInDB = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
