@@ -90,6 +90,12 @@ const SessionManagementPage = () => {
   };
 
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [showPairingModal, setShowPairingModal] = useState(false);
+  const [pairingPort, setPairingPort] = useState('');
+  const [pairingCode, setPairingCode] = useState('');
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [pendingSession, setPendingSession] = useState<SessionResponse | null>(null);
 
   // 处理连接会话
   const handleConnectSession = async (session: SessionResponse) => {
@@ -99,6 +105,31 @@ const SessionManagementPage = () => {
       console.log('开始连接设备:', session.id);
 
       if (window.electronAPI) {
+        // 先检查/启动 ADB 服务
+        const serverResult = await window.electronAPI.checkAdbServer();
+        if (!serverResult.success) {
+          throw new Error(serverResult.error || 'ADB 服务启动失败');
+        }
+        console.log('ADB 服务已就绪');
+
+        // 检查设备是否已配对
+        const checkResult = await window.electronAPI.adbCheckDevice({
+          deviceIp: session.device_ip,
+          devicePort: session.device_port,
+        });
+
+        if (!checkResult.paired) {
+          // 未配对,打开配对弹窗
+          setPendingSession(session);
+          setPairingPort('');
+          setPairingCode('');
+          setPairingError(null);
+          setShowPairingModal(true);
+          setConnectingSession(null);
+          return;
+        }
+
+        // 再连接设备
         const result = await window.electronAPI.adbConnectDevice({
           deviceIp: session.device_ip,
           devicePort: session.device_port,
@@ -120,6 +151,62 @@ const SessionManagementPage = () => {
       console.error('连接设备失败:', err);
       setConnectError('连接设备失败，请检查设备IP和端口是否正确');
     } finally {
+      setConnectingSession(null);
+    }
+  };
+
+  // 处理 ADB WLAN 配对
+  const handlePairSubmit = async () => {
+    if (!pendingSession || !window.electronAPI) return;
+
+    if (!/^\d{6}$/.test(pairingCode)) {
+      setPairingError('请输入6位配对码');
+      return;
+    }
+    const portNum = parseInt(pairingPort, 10);
+    if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+      setPairingError('请输入有效的配对端口 (1-65535)');
+      return;
+    }
+
+    setPairingLoading(true);
+    setPairingError(null);
+
+    try {
+      const pairResult = await window.electronAPI.adbPairDevice({
+        deviceIp: pendingSession.device_ip,
+        pairingPort: portNum,
+        code: pairingCode,
+      });
+      if (!pairResult.success) {
+        setPairingError(pairResult.error || 'ADB 配对失败');
+        setPairingLoading(false);
+        return;
+      }
+      console.log('ADB 配对成功');
+
+      // 等待配对生效
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const connectResult = await window.electronAPI.adbConnectDevice({
+        deviceIp: pendingSession.device_ip,
+        devicePort: pendingSession.device_port,
+      });
+      if (!connectResult.success) {
+        setPairingError(connectResult.error || '配对成功但 ADB 连接失败');
+        setPairingLoading(false);
+        return;
+      }
+
+      console.log('ADB 连接设备成功');
+      setShowPairingModal(false);
+      setPendingSession(null);
+      navigate(`/sessions/${pendingSession.id}`);
+    } catch (err) {
+      console.error('配对或连接失败:', err);
+      setPairingError('配对或连接过程中发生异常');
+    } finally {
+      setPairingLoading(false);
       setConnectingSession(null);
     }
   };
@@ -347,6 +434,110 @@ const SessionManagementPage = () => {
                 className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
               >
                 创建
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADB WLAN 配对弹窗 */}
+      {showPairingModal && pendingSession && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">ADB WLAN 配对</h3>
+              <button
+                onClick={() => { setShowPairingModal(false); setPendingSession(null); }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+              设备尚未配对。请在 Android 设备上打开「开发者选项 &gt; 无线调试 &gt; 使用配对码配对设备」，然后输入以下信息：
+            </p>
+
+            {pairingError && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded mb-4" role="alert">
+                {pairingError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">设备 IP</label>
+                <input
+                  type="text"
+                  value={pendingSession.device_ip}
+                  readOnly
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-400 cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">连接端口（仅供参考）</label>
+                <input
+                  type="text"
+                  value={pendingSession.device_port}
+                  readOnly
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-400 cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  配对端口 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  value={pairingPort}
+                  onChange={e => setPairingPort(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="例如: 41325"
+                  min="1"
+                  max="65535"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  配对码 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={pairingCode}
+                  onChange={e => setPairingCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="6位配对码"
+                  maxLength={6}
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => { setShowPairingModal(false); setPendingSession(null); }}
+                className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:bg-gray-600"
+              >
+                取消
+              </button>
+              <button
+                onClick={handlePairSubmit}
+                disabled={pairingLoading}
+                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {pairingLoading ? (
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    配对中...
+                  </span>
+                ) : '配对并连接'}
               </button>
             </div>
           </div>

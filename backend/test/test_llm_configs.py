@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from backend.model.models_db import User, LLMConfig
 import uuid
 from backend.api.auth import get_password_hash
+from backend.infra.crypto_utils import encrypt_api_key
 
 client = TestClient(app)
 
@@ -59,11 +60,11 @@ def test_token(test_user):
 @pytest.fixture
 def test_llm_config(db: Session, test_user):
     """创建测试LLM配置"""
-    hashed_api_key = get_password_hash("test-api-key-123456")
+    encrypted_api_key = encrypt_api_key("test-api-key-123456")
     config = LLMConfig(
         id=str(uuid.uuid4()),
         user_id=test_user.id,
-        api_key=hashed_api_key,
+        api_key=encrypted_api_key,
         base_url="https://api.openai.com/v1",
         model="gpt-3.5-turbo",
         temperature=0.7,

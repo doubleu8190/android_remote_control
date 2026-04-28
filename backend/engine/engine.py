@@ -47,7 +47,7 @@ class AIEngine:
             [
                 ("system", self.system_instruction),
                 MessagesPlaceholder(variable_name="history"),
-                ("human", "{user_input}"),
+                ("human", "{input}"),
             ]
         )
 
@@ -71,6 +71,7 @@ class AIEngine:
         self.config = {"configurable": {"session_id": self.session_id}}
 
         self.initialized = True
+        logging.info(f"Initialized AIEngine for session {self.session_id}")
 
     def call_tool(self, tc: Any) -> ToolMessage:
         tool_name = tc["name"]
@@ -89,9 +90,12 @@ class AIEngine:
 
         history = session_history_manager.get_session_history(self.session_id)
 
-        # 1. 进行带记忆的对话（RunnableWithMessageHistory 自动保存输入输出到历史）
-        response = self.conversation.invoke({"input": user_input}, config=self.config)
-        logging.info(f"llm response: {response.content}")
+        try:
+            # 1. 进行带记忆的对话（RunnableWithMessageHistory 自动保存输入输出到历史）
+            response = self.conversation.invoke({"input": user_input}, config=self.config)
+        except Exception as e:
+            logging.error(f"Error during conversation invoke: {e}")
+            return f"对话处理失败：{str(e)}"
 
         # 2. 检查是否有 tool_calls，最多循环 10 次
         max_iterations = 10
@@ -106,10 +110,14 @@ class AIEngine:
                 if history:
                     history.add_message(tool_msg)
 
-            # 重新调用模型，将工具结果纳入上下文
-            response = self.conversation.invoke(
-                {"input": ""},
-                config=self.config,
-            )
+            try:
+                # 重新调用模型，将工具结果纳入上下文
+                response = self.conversation.invoke(
+                    {"input": ""},
+                    config=self.config,
+                )
+            except Exception as e:
+                logging.error(f"Error during conversation invoke: {e}")
+                return f"工具调用对话处理失败：{str(e)}"
 
         return response.content

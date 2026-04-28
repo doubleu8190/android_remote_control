@@ -20,7 +20,7 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
         db_messages = (
             self.db_session.query(DBMessage)
             .filter(DBMessage.session_id == self.session_id)
-            .order_by(DBMessage.created_at)
+            .order_by(DBMessage.timestamp)
             .all()
         )
 
@@ -42,7 +42,7 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
         elif role == MessageRole.SYSTEM.value:
             return SystemMessage(content=content)
         elif role == MessageRole.TOOL.value:
-            return ToolMessage(content=content)
+            return ToolMessage(content=content, tool_call_id="")
         else:
             return HumanMessage(content=content)
 
@@ -52,7 +52,7 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
         db_messages = (
             self.db_session.query(DBMessage)
             .filter(DBMessage.session_id == self.session_id)
-            .order_by(DBMessage.created_at)
+            .order_by(DBMessage.timestamp)
             .all()
         )
         return db_messages
@@ -66,7 +66,7 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
             ),  # 需要实现一个函数，将LangChain消息类型映射到你的role字段
             content=message.content,
             status=MessageStatus.SENT,
-            created_at=datetime.now(),
+            timestamp=datetime.now(),
         )
         self.db_session.add(db_message)
         self.db_session.commit()
@@ -92,7 +92,7 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
 
     # 以下两个方法是LangChain的完整接口定义通常需要的，提供基本实现即可。
     def __len__(self):
-        return len(self.langchain_messages)
+        return len(self.messages)
 
     def __bool__(self):
-        return bool(self.langchain_messages)
+        return bool(self.messages)

@@ -19,6 +19,11 @@ const AdbScreenCastElectron: React.FC<AdbScreenCastElectronProps> = ({
   const [status, setStatus] = useState<ConnectStatus>('disconnected');
   const [errorMessage, setErrorMessage] = useState('');
   const [stats, setStats] = useState({ fps: 0, frameBytes: 0 });
+  const [showPairingModal, setShowPairingModal] = useState(false);
+  const [pairingPort, setPairingPort] = useState('');
+  const [pairingCode, setPairingCode] = useState('');
+  const [pairingError, setPairingError] = useState('');
+  const [pairingLoading, setPairingLoading] = useState(false);
   const cleanupRef = useRef<(() => void) | null>(null);
   const frameCountRef = useRef<number>(0);
   const lastFpsTimeRef = useRef<number>(0);
@@ -78,6 +83,35 @@ const AdbScreenCastElectron: React.FC<AdbScreenCastElectronProps> = ({
     });
   }, []);
 
+  const startScreencapInternal = useCallback(async () => {
+    if (!window.electronAPI) return;
+
+    const unsubFrame = window.electronAPI.onAdbScreencapFrame(handleFrame);
+    cleanupRef.current = unsubFrame;
+
+    try {
+      const result = await window.electronAPI.startAdbScreencap({
+        deviceIp,
+        devicePort,
+      });
+
+      if (!mountedRef.current) return;
+
+      if (result.success) {
+        lastFpsTimeRef.current = Date.now();
+        console.log(`[AdbScreenCastElectron] ADB 投屏启动成功 ${deviceIp}:${devicePort}`);
+      } else {
+        setErrorMessage(result.error || '启动 ADB 投屏失败');
+        setStatus('error');
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setErrorMessage(err instanceof Error ? err.message : '启动 ADB 投屏异常');
+        setStatus('error');
+      }
+    }
+  }, [deviceIp, devicePort, handleFrame]);
+
   const handleStart = useCallback(async () => {
     if (!window.electronAPI) {
       setErrorMessage('electronAPI 不可用，请确保在 Electron 环境中运行');
@@ -107,31 +141,70 @@ const AdbScreenCastElectron: React.FC<AdbScreenCastElectronProps> = ({
       return;
     }
 
-    const unsubFrame = window.electronAPI.onAdbScreencapFrame(handleFrame);
-    cleanupRef.current = unsubFrame;
-
+    // 检查设备是否已配对
     try {
-      const result = await window.electronAPI.startAdbScreencap({
-        deviceIp,
-        devicePort,
-      });
-
+      const checkResult = await window.electronAPI.adbCheckDevice({ deviceIp, devicePort });
       if (!mountedRef.current) return;
 
-      if (result.success) {
-        lastFpsTimeRef.current = Date.now();
-        console.log(`[AdbScreenCastElectron] ADB 投屏启动成功 ${deviceIp}:${devicePort}`);
-      } else {
-        setErrorMessage(result.error || '启动 ADB 投屏失败');
-        setStatus('error');
+      if (!checkResult.paired) {
+        setStatus('disconnected');
+        setShowPairingModal(true);
+        return;
       }
     } catch (err) {
-      if (mountedRef.current) {
-        setErrorMessage(err instanceof Error ? err.message : '启动 ADB 投屏异常');
-        setStatus('error');
-      }
+      console.error('[AdbScreenCastElectron] 检查设备配对状态失败:', err);
     }
-  }, [deviceIp, devicePort, handleFrame]);
+
+    await startScreencapInternal();
+  }, [deviceIp, devicePort, handleFrame, startScreencapInternal]);
+
+  const handlePairSubmit = useCallback(async () => {
+    if (!window.electronAPI) return;
+
+    if (!/^\d{6}$/.test(pairingCode)) {
+      setPairingError('请输入6位配对码');
+      return;
+    }
+    const portNum = parseInt(pairingPort, 10);
+    if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+      setPairingError('请输入有效的配对端口 (1-65535)');
+      return;
+    }
+
+    setPairingLoading(true);
+    setPairingError('');
+
+    try {
+      const pairResult = await window.electronAPI.adbPairDevice({
+        deviceIp,
+        pairingPort: portNum,
+        code: pairingCode,
+      });
+      if (!mountedRef.current) return;
+
+      if (!pairResult.success) {
+        setPairingError(pairResult.error || 'ADB 配对失败');
+        setPairingLoading(false);
+        return;
+      }
+
+      console.log('[AdbScreenCastElectron] ADB 配对成功');
+      setShowPairingModal(false);
+      setPairingLoading(false);
+
+      // 等待配对生效
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // 继续启动投屏
+      setStatus('connecting');
+      await startScreencapInternal();
+    } catch (err) {
+      if (mountedRef.current) {
+        setPairingError(err instanceof Error ? err.message : '配对异常');
+      }
+      setPairingLoading(false);
+    }
+  }, [deviceIp, devicePort, pairingCode, pairingPort, startScreencapInternal]);
 
   const handleStop = useCallback(async () => {
     if (cleanupRef.current) {
@@ -239,6 +312,110 @@ const AdbScreenCastElectron: React.FC<AdbScreenCastElectronProps> = ({
             {stats.fps} FPS
           </div>
         </>
+      )}
+
+      {/* ADB WLAN 配对弹窗 */}
+      {showPairingModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">ADB WLAN 配对</h3>
+              <button
+                onClick={() => { setShowPairingModal(false); setPairingError(''); }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+              设备尚未配对。请在 Android 设备上打开「开发者选项 &gt; 无线调试 &gt; 使用配对码配对设备」，然后输入以下信息：
+            </p>
+
+            {pairingError && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded mb-4" role="alert">
+                {pairingError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">设备 IP</label>
+                <input
+                  type="text"
+                  value={deviceIp}
+                  readOnly
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-400 cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">连接端口（仅供参考）</label>
+                <input
+                  type="text"
+                  value={devicePort}
+                  readOnly
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-400 cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  配对端口 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  value={pairingPort}
+                  onChange={e => setPairingPort(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="例如: 41325"
+                  min="1"
+                  max="65535"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  配对码 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={pairingCode}
+                  onChange={e => setPairingCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="6位配对码"
+                  maxLength={6}
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => { setShowPairingModal(false); setPairingError(''); }}
+                className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:bg-gray-600"
+              >
+                取消
+              </button>
+              <button
+                onClick={handlePairSubmit}
+                disabled={pairingLoading}
+                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {pairingLoading ? (
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    配对中...
+                  </span>
+                ) : '配对并连接'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

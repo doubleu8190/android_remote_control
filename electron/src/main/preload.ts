@@ -41,6 +41,16 @@ interface AdbScreencapStatus {
   running: boolean;
 }
 
+interface AdbPairDeviceOptions {
+  deviceIp: string;
+  pairingPort: number;
+  code: string;
+}
+
+interface AdbCheckDeviceResult {
+  paired: boolean;
+}
+
 // 安全地暴露API给渲染进程
 contextBridge.exposeInMainWorld('electronAPI', {
   // 获取应用信息
@@ -94,9 +104,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkAdbServer: () =>
     ipcRenderer.invoke('adb-check-server') as Promise<AdbScreencapResult>,
 
+  // ADB 设备检查
+  adbCheckDevice: (options: { deviceIp: string; devicePort: number }) =>
+    ipcRenderer.invoke('adb-check-device', options) as Promise<AdbCheckDeviceResult>,
+
   // ADB 设备连接
   adbConnectDevice: (options: AdbScreencapStartOptions) =>
     ipcRenderer.invoke('adb-connect-device', options) as Promise<AdbScreencapResult>,
+
+  // ADB WLAN 配对
+  adbPairDevice: (options: AdbPairDeviceOptions) =>
+    ipcRenderer.invoke('adb-pair-device', options) as Promise<AdbScreencapResult>,
 
   // 监听主窗口事件（用于 scrcpy 位置同步）
   onMainWindowMoved: (callback: () => void) => {
@@ -139,7 +157,9 @@ declare global {
       onAdbScreencapFrame: (callback: (data: ArrayBuffer) => void) => () => void;
 
       checkAdbServer: () => Promise<AdbScreencapResult>;
+      adbCheckDevice: (options: { deviceIp: string; devicePort: number }) => Promise<AdbCheckDeviceResult>;
       adbConnectDevice: (options: AdbScreencapStartOptions) => Promise<AdbScreencapResult>;
+      adbPairDevice: (options: AdbPairDeviceOptions) => Promise<AdbScreencapResult>;
 
       onMainWindowMoved: (callback: () => void) => () => void;
       onMainWindowResized: (callback: () => void) => () => void;

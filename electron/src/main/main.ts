@@ -554,12 +554,42 @@ ipcMain.handle('adb-check-server', async () => {
   }
 });
 
+ipcMain.handle('adb-check-device', async (_event, options: { deviceIp: string; devicePort: number }) => {
+  try {
+    const result = execSync('adb devices', { timeout: 3000 }).toString();
+    const paired = result.includes(`${options.deviceIp}:${options.devicePort}\tdevice`);
+    return { paired };
+  } catch (error) {
+    console.error('[ADB] 检查设备配对状态失败:', error);
+    return { paired: false, error: String(error) };
+  }
+});
+
 ipcMain.handle('adb-connect-device', async (_event, options: { deviceIp: string; devicePort: number }) => {
   const connected = ensureAdbConnected(options.deviceIp, options.devicePort);
   if (connected) {
     return { success: true };
   }
   return { success: false, error: `ADB 连接设备 ${options.deviceIp}:${options.devicePort} 失败` };
+});
+
+ipcMain.handle('adb-pair-device', async (_event, options: { deviceIp: string; pairingPort: number; code: string }) => {
+  try {
+    const result = execSync(
+      `adb pair ${options.deviceIp}:${options.pairingPort} ${options.code}`,
+      { timeout: 15000 }
+    ).toString();
+    console.log('[ADB] 配对结果:', result);
+    const lower = result.toLowerCase();
+    if (lower.includes('success') || lower.includes('配对成功') || lower.includes('successfully')) {
+      return { success: true };
+    }
+    return { success: false, error: result.trim() || '配对失败' };
+  } catch (error) {
+    console.error('[ADB] 配对失败:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message };
+  }
 });
 
 ipcMain.handle('adb-screencap-start', async (_event, options: { deviceIp: string; devicePort: number }) => {

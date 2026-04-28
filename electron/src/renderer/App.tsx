@@ -48,9 +48,18 @@ declare global {
       onAdbScreencapFrame: (callback: (data: ArrayBuffer) => void) => () => void;
 
       checkAdbServer: () => Promise<{ success: boolean; error?: string }>;
+      adbCheckDevice: (options: {
+        deviceIp: string;
+        devicePort: number;
+      }) => Promise<{ paired: boolean }>;
       adbConnectDevice: (options: {
         deviceIp: string;
         devicePort: number;
+      }) => Promise<{ success: boolean; error?: string }>;
+      adbPairDevice: (options: {
+        deviceIp: string;
+        pairingPort: number;
+        code: string;
       }) => Promise<{ success: boolean; error?: string }>;
 
       onMainWindowMoved: (callback: () => void) => () => void;

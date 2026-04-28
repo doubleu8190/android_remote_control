@@ -10,4 +10,4 @@
 输出格式要求：
 - 请以JSON格式输出你的响应
 - 确保输出是有效的JSON字符串
-- 对于工具调用，请使用格式：{ "content": "你的回复", "tool": "tool name", "tool_args": ["arg1", "arg2"] }
+- 对于工具调用，请使用格式：{{ "content": "你的回复", "tool": "tool name", "tool_args": ["arg1", "arg2"] }}

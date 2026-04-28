@@ -6,7 +6,8 @@ from backend.model.models_api import (
 )
 from backend.infra.database import get_db
 from backend.model.models_db import LLMConfig, User
-from backend.api.auth import get_current_active_user, get_password_hash
+from backend.api.auth import get_current_active_user
+from backend.infra.crypto_utils import encrypt_api_key
 import logging
 
 router = APIRouter(prefix="/api/llm-configs", tags=["llm-configs"])
@@ -20,12 +21,12 @@ async def create_llm_config(
 ):
     """创建LLM配置"""
     # 加密API密钥
-    hashed_api_key = get_password_hash(config_data.api_key)
-    
+    encrypted_api_key = encrypt_api_key(config_data.api_key)
+
     # 创建新配置
     db_config = LLMConfig(
         user_id=current_user.id,
-        api_key=hashed_api_key,
+        api_key=encrypted_api_key,
         base_url=config_data.base_url,
         model=config_data.model,
         temperature=config_data.temperature,
@@ -141,7 +142,7 @@ async def update_llm_config(
     
     # 如果更新API密钥，需要加密
     if "api_key" in update_data:
-        update_data["api_key"] = get_password_hash(update_data["api_key"])
+        update_data["api_key"] = encrypt_api_key(update_data["api_key"])
     
     try:
         for field, value in update_data.items():

@@ -139,4 +139,4 @@ class LLMConfig(Base):
     user = relationship("User")
 
     def __repr__(self):
-        return f"<LLMConfig(id={self.id}, model={self.model}, user_id={self.user_id})>"
+        return f"<LLMConfig(id={self.id}, model={self.model}, api_key={self.api_key}, user_id={self.user_id})>"

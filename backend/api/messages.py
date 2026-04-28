@@ -64,6 +64,7 @@ async def send_message(
     # 获取AI引擎并生成响应
     try:
         engine = engine_manager.get_or_create_engine(db_session, db)
+        logging.info(f"获取AI引擎成功: {engine}")
         if not engine:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

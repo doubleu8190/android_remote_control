@@ -4,13 +4,14 @@ from sqlalchemy.orm import Session
 from backend.engine.engine import AIEngine
 from langchain_openai import ChatOpenAI
 from langchain_community.tools import Tool
-from backend.model.models_db import Message as DBMessage
+from backend.model.models_db import LLMConfig, Message as DBMessage
 
 # 导入配置加载器
 from backend.config.config_loader import engine_config
 from .middleware import monitor_tool, monitor_model
 from backend.model.models_db import Session as DBSession
 from backend.infra.session_history_manager import session_history_manager
+from backend.infra.crypto_utils import decrypt_api_key
 import logging
 
 
@@ -60,12 +61,15 @@ class AIEngineManager:
             # 确保会话历史管理器已初始化
             if db_session:
                 session_history_manager.create_session_history(session.id, db_session)
-            # 从配置文件获取LLM配置
+
+            # 查询LLM配置并创建基础LLM实例
+            llm_config = db_session.query(LLMConfig).filter(LLMConfig.id == session.llm_config_id).order_by(LLMConfig.created_at).first()
+            logging.info(f"LLM配置加载成功: {llm_config}")
             openai_config = engine_config.get_config("llm.openai", {})
             base_llm = ChatOpenAI(
-                api_key=session.api_key,
-                base_url=session.base_url,
-                model=session.model_name,
+                api_key=decrypt_api_key(llm_config.api_key),
+                base_url=llm_config.base_url,
+                model=llm_config.model,
                 temperature=openai_config.get("temperature", 0.7),
                 max_tokens=openai_config.get("max_tokens", 1000),
                 timeout=openai_config.get("timeout", 30),
