@@ -59,6 +59,10 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
 
     def add_message(self, message: BaseMessage) -> None:  # 2️⃣ 核心接口：添加单条消息
         """向数据库中添加一条新消息。"""
+        metadata = None
+        if isinstance(message, ToolMessage) and message.name:
+            metadata = {"tool_name": message.name}
+
         db_message = DBMessage(
             session_id=self.session_id,
             role=self._get_role(
@@ -67,6 +71,7 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
             content=message.content,
             status=MessageStatus.SENT,
             timestamp=datetime.now(),
+            message_metadata=metadata,
         )
         self.db_session.add(db_message)
         self.db_session.commit()

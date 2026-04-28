@@ -568,6 +568,18 @@ const SessionDetailPage = () => {
 
   const handleSendMessage = async (content: string) => {
     if (!sessionId || sendingMessage) return;
+
+    // Show user message immediately
+    const userMsg: MessageResponse = {
+      id: `user-${Date.now()}`,
+      content,
+      role: 'user',
+      status: 'sent',
+      timestamp: new Date().toISOString(),
+      session_id: sessionId,
+    };
+    setMessages(prev => [...prev, userMsg]);
+
     try {
       setSendingMessage(true);
       const token = localStorage.getItem('auth_token');
@@ -583,14 +595,6 @@ const SessionDetailPage = () => {
       if (!response.ok) throw new Error('发送消息失败');
 
       const result = await response.json();
-      const userMsg: MessageResponse = {
-        id: `user-${Date.now()}`,
-        content,
-        role: 'user',
-        status: 'sent',
-        timestamp: new Date().toISOString(),
-        session_id: sessionId,
-      };
       const aiMsg: MessageResponse = {
         id: result.messageId || `ai-${Date.now()}`,
         content: result.content || '',
@@ -599,7 +603,7 @@ const SessionDetailPage = () => {
         timestamp: result.timestamp || new Date().toISOString(),
         session_id: sessionId,
       };
-      setMessages(prev => [...prev, userMsg, aiMsg]);
+      setMessages(prev => [...prev, aiMsg]);
     } catch (err) {
       console.error('发送消息失败:', err);
       setMessageError('发送消息失败，请稍后重试');
