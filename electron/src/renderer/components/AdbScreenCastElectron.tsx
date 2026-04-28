@@ -141,18 +141,23 @@ const AdbScreenCastElectron: React.FC<AdbScreenCastElectronProps> = ({
       return;
     }
 
-    // 检查设备是否已配对
+    // 确保设备已连接（如果尚未连接，adb connect 会自动重连）
     try {
-      const checkResult = await window.electronAPI.adbCheckDevice({ deviceIp, devicePort });
+      const connectResult = await window.electronAPI.adbConnectDevice({ deviceIp, devicePort });
       if (!mountedRef.current) return;
 
-      if (!checkResult.paired) {
+      if (!connectResult.success) {
         setStatus('disconnected');
         setShowPairingModal(true);
         return;
       }
     } catch (err) {
-      console.error('[AdbScreenCastElectron] 检查设备配对状态失败:', err);
+      console.error('[AdbScreenCastElectron] 连接设备失败:', err);
+      if (mountedRef.current) {
+        setStatus('error');
+        setErrorMessage(err instanceof Error ? err.message : '连接设备失败');
+      }
+      return;
     }
 
     await startScreencapInternal();

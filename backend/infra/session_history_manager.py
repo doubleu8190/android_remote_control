@@ -17,16 +17,12 @@ class SessionHistoryManager:
             self.session_to_history: Dict[str, SQLAlchemyMessageHistory] = {}
 
     def get_session_history(self, session_id: str) -> SQLAlchemyMessageHistory | None:
-        logging.info(f"Retrieving session history for session_id: {session_id}")
-        logging.info(f"Current session histories: {list(self.session_to_history.keys())}")
         return self.session_to_history[session_id]
 
     def create_session_history(
         self, session_id: str, db_session: Session
     ) -> SQLAlchemyMessageHistory:
-        logging.info(f"Creating session history for session_id: {session_id}")
         if session_id in self.session_to_history:
-            logging.warning(f"Session history already exists for session_id: {session_id}")
             return self.session_to_history[session_id]
         self.session_to_history[session_id] = SQLAlchemyMessageHistory(
             session_id=session_id, db_session=db_session

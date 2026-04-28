@@ -7,7 +7,7 @@ from langchain_core.language_models import BaseLanguageModel
 from langchain_core.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 from ..infra.session_history_manager import session_history_manager
 from typing import Any, List, Dict
 import logging
@@ -41,20 +41,21 @@ class AIEngine:
         """
         if self.initialized:
             return
-
+        logging.info(f"Initializing AIEngine for session {self.session_id}")
         # 1. 定义提示模板，包含历史消息的占位符
         self.prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", self.system_instruction),
+                SystemMessage(content=self.system_instruction),
                 MessagesPlaceholder(variable_name="history"),
                 ("human", "{input}"),
             ]
         )
-
+        logging.info(f"Prompt template created: {self.prompt}")
         # 2. 绑定工具到模型（仅在存在工具时）
         if self.tools:
             self.llm = self.llm.bind_tools(self.tools)
 
+        logging.info(f"LLM bound with tools: {self.tools}")
         # 3. 创建链
         chain = self.prompt | self.llm 
 
@@ -66,7 +67,7 @@ class AIEngine:
             input_messages_key="input",
             history_messages_key="history",
         )
-
+        logging.info(f"Conversation chain created with RunnableWithMessageHistory: {self.conversation}")
         # 4. 传递会话ID到模型调用
         self.config = {"configurable": {"session_id": self.session_id}}
 
@@ -91,8 +92,10 @@ class AIEngine:
         history = session_history_manager.get_session_history(self.session_id)
 
         try:
+            logging.info(f"AIEngine received input for session {self.session_id}: {user_input}")
             # 1. 进行带记忆的对话（RunnableWithMessageHistory 自动保存输入输出到历史）
             response = self.conversation.invoke({"input": user_input}, config=self.config)
+            logging.info(f"AIEngine response for session {self.session_id}: {response}")
         except Exception as e:
             logging.error(f"Error during conversation invoke: {e}")
             return f"对话处理失败：{str(e)}"

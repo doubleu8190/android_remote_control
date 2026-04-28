@@ -11,6 +11,7 @@ import MessageInput from './components/MessageInput';
 
 import { sessionApi, SessionResponse, MessageResponse } from './services/sessionApi';
 import { llmConfigApi } from './services/llmConfigApi';
+import API_BASE_URL from './services/config';
 
 // 会话管理页面组件
 const SessionManagementPage = () => {
@@ -112,14 +113,14 @@ const SessionManagementPage = () => {
         }
         console.log('ADB 服务已就绪');
 
-        // 检查设备是否已配对
-        const checkResult = await window.electronAPI.adbCheckDevice({
+        // 直接尝试连接设备（adb connect 会处理已配对直连和首次连接）
+        const result = await window.electronAPI.adbConnectDevice({
           deviceIp: session.device_ip,
           devicePort: session.device_port,
         });
 
-        if (!checkResult.paired) {
-          // 未配对,打开配对弹窗
+        if (!result.success) {
+          // 设备尚未授权，需要先配对
           setPendingSession(session);
           setPairingPort('');
           setPairingCode('');
@@ -128,16 +129,7 @@ const SessionManagementPage = () => {
           setConnectingSession(null);
           return;
         }
-
-        // 再连接设备
-        const result = await window.electronAPI.adbConnectDevice({
-          deviceIp: session.device_ip,
-          devicePort: session.device_port,
-        });
-        if (!result.success) {
-          throw new Error(result.error || 'ADB 连接失败');
-        }
-        console.log('ADB 直连设备成功');
+        console.log('ADB 连接设备成功');
       } else {
         await sessionApi.connectSession({
           session_id: session.id,
@@ -579,7 +571,7 @@ const SessionDetailPage = () => {
     try {
       setSendingMessage(true);
       const token = localStorage.getItem('auth_token');
-      const response = await fetch('http://localhost:8080/api/messages/send', {
+      const response = await fetch(`${API_BASE_URL}/messages/send`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
