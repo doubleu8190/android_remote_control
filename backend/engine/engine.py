@@ -126,9 +126,30 @@ class AIEngine:
 
         return response.content
 
+    def _stream_llm(self, input_data: dict) -> Generator[dict, None, Any]:
+        """Stream LLM response, yield text events, return accumulated AIMessage via StopIteration."""
+        full = None
+        for chunk in self.conversation.stream(input_data, config=self.config):
+            full = chunk if full is None else full + chunk
+            if chunk.content:
+                yield {"type": "text", "data": chunk.content}
+        return full
+
+    def _consume_stream(self, input_data: dict) -> Any:
+        """Consume _stream_llm generator and extract the return value."""
+        gen = self._stream_llm(input_data)
+        try:
+            while True:
+                yield next(gen)
+        except StopIteration as e:
+            return e.value
+
     def chat_stream(self, user_input: str) -> Generator[dict, None, None]:
         """
         Process user input and yield streaming events for real-time frontend updates.
+
+        Uses LangChain's stream() to yield LLM text tokens as they are generated.
+        For tool calls, accumulates the streamed chunks to detect and handle them.
 
         Yields dicts with keys:
             type: 'tool_call' | 'tool_result' | 'text' | 'error' | 'done'
@@ -139,7 +160,11 @@ class AIEngine:
         history = session_history_manager.get_session_history(self.session_id)
 
         try:
-            response = self.conversation.invoke({"input": user_input}, config=self.config)
+            gen = self._consume_stream({"input": user_input})
+            while True:
+                yield next(gen)
+        except StopIteration as e:
+            response = e.value
         except Exception as e:
             yield {"type": "error", "data": str(e)}
             return
@@ -147,7 +172,7 @@ class AIEngine:
         max_iterations = 10
         iteration = 0
 
-        while response.tool_calls and iteration < max_iterations:
+        while response and response.tool_calls and iteration < max_iterations:
             iteration += 1
 
             # Yield tool call events before executing
@@ -176,16 +201,18 @@ class AIEngine:
                         "message_id": tc.get("id", ""),
                     }
 
-            # Re-invoke the model with tool results
+            # Re-invoke the model with tool results (streaming)
             try:
-                response = self.conversation.invoke(
-                    {"input": ""},
-                    config=self.config,
-                )
+                gen = self._consume_stream({"input": ""})
+                while True:
+                    yield next(gen)
+            except StopIteration as e:
+                response = e.value
             except Exception as e:
                 yield {"type": "error", "data": str(e)}
                 return
 
-        # Yield the final text response
-        yield {"type": "text", "data": response.content}
+        # Yield the final full text content so the frontend has the definite version
+        if response and response.content:
+            yield {"type": "text", "data": response.content}
         yield {"type": "done", "data": ""}
