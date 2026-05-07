@@ -1,7 +1,9 @@
 import subprocess
 import logging
 import asyncio
-from typing import Optional
+import xml.etree.ElementTree as ET
+import re
+from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -82,3 +84,83 @@ def get_device_resolution(device_ip: str, device_port: int) -> Optional[tuple[in
         except (ValueError, IndexError):
             logger.error(f"解析分辨率失败: {result.stdout}")
     return None
+
+
+def get_ui_hierarchy(device_ip: str, device_port: int) -> Optional[dict[str, Any]]:
+    """
+    Get the current UI hierarchy from the device using uiautomator dump.
+    Returns parsed elements with bounds, center coordinates, text, and content-desc.
+    """
+    if not ensure_connected(device_ip, device_port):
+        logger.error(f"无法连接设备 {device_ip}:{device_port}")
+        return None
+
+    # Dump UI hierarchy to device's local storage
+    dump_cmd = f"adb -s {device_ip}:{device_port} shell uiautomator dump"
+    subprocess.run(dump_cmd, shell=True, capture_output=True, timeout=10)
+
+    # Read the dump file (commonly found at /sdcard/window_dump.xml, fallback to /data/local/tmp)
+    for path in ["/sdcard/window_dump.xml", "/data/local/tmp/window_dump.xml"]:
+        read_cmd = f"adb -s {device_ip}:{device_port} shell cat {path}"
+        result = subprocess.run(read_cmd, shell=True, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0 and len(result.stdout.strip()) > 50:
+            break
+    else:
+        logger.error("UI hierarchy dump file not found on device")
+        return None
+
+    try:
+        root = ET.fromstring(result.stdout.encode("utf-8"))
+        elements: list[dict[str, Any]] = []
+
+        def extract_nodes(node: ET.Element, depth: int = 0) -> None:
+            bounds = node.get("bounds", "")
+            match = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
+            if match:
+                x1, y1, x2, y2 = map(int, match.groups())
+                center_x = (x1 + x2) // 2
+                center_y = (y1 + y2) // 2
+            else:
+                center_x = center_y = 0
+
+            clickable = node.get("clickable") == "true"
+            text = (node.get("text") or "").strip()
+            content_desc = (node.get("content-desc") or "").strip()
+            cls = node.get("class", "").split(".")[-1] if node.get("class") else ""
+
+            # Include elements that are clickable, have text, or have content descriptions
+            if (clickable or text or content_desc) and center_x > 0 and center_y > 0:
+                elements.append({
+                    "text": text,
+                    "content_desc": content_desc,
+                    "class": cls,
+                    "clickable": clickable,
+                    "center": [center_x, center_y],
+                    "bounds": [x1, y1, x2, y2],
+                })
+
+            for child in node:
+                extract_nodes(child, depth + 1)
+
+        extract_nodes(root)
+
+        # Also include screen resolution
+        resolution = get_device_resolution(device_ip, device_port)
+
+        return {
+            "screen_resolution": {"width": resolution[0], "height": resolution[1]} if resolution else None,
+            "elements_count": len(elements),
+            "elements": elements,
+        }
+    except ET.ParseError as e:
+        logger.error(f"解析UI层次结构XML失败: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"处理UI层次结构异常: {e}")
+        return None
+
+
+async def get_ui_hierarchy_async(device_ip: str, device_port: int) -> Optional[dict[str, Any]]:
+    """Async wrapper for get_ui_hierarchy."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, get_ui_hierarchy, device_ip, device_port)

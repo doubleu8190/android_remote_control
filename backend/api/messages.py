@@ -1,8 +1,11 @@
 from datetime import datetime
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from backend.engine.engine_manager import engine_manager
+import asyncio
+import json
 import logging
 
 from backend.model.models_api import (
@@ -94,6 +97,63 @@ async def send_message(
         timestamp=datetime.now(),
         session_id=session_id,
         stream=False,
+    )
+
+
+@router.post("/send/stream")
+async def send_message_stream(
+    request: SendMessageRequest,
+    current_user: UserInDB = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Send message and stream AI response with tool call events via SSE."""
+    session_id = request.session_id
+    if not session_id:
+        raise HTTPException(status_code=400, detail="会话ID不能为空")
+
+    db_session = _get_validated_session(db, session_id, current_user.id)
+
+    engine = engine_manager.get_or_create_engine(db_session, db)
+    if not engine:
+        raise HTTPException(
+            status_code=500, detail="AI引擎初始化失败"
+        )
+
+    async def event_generator():
+        loop = asyncio.get_event_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def run_engine():
+            """Run the synchronous chat_stream generator in a thread."""
+            try:
+                for event in engine.chat_stream(request.message):
+                    queue.put_nowait(event)
+            except Exception as e:
+                queue.put_nowait({"type": "error", "data": str(e)})
+            finally:
+                queue.put_nowait(None)  # Sentinel signals end of stream
+
+        # Start the engine in a thread pool so it doesn't block the event loop
+        thread_task = loop.run_in_executor(None, run_engine)
+
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            # Ensure the thread finishes
+            await thread_task
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

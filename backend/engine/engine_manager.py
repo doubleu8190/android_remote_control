@@ -3,7 +3,7 @@ from typing import Dict, List
 from sqlalchemy.orm import Session
 from backend.engine.engine import AIEngine
 from langchain_openai import ChatOpenAI
-from langchain_community.tools import Tool
+from langchain_core.tools import BaseTool
 from backend.model.models_db import LLMConfig, Message as DBMessage
 
 # 导入配置加载器
@@ -66,7 +66,9 @@ class AIEngineManager:
             llm_config = db_session.query(LLMConfig).filter(LLMConfig.id == session.llm_config_id).order_by(LLMConfig.created_at).first()
             logging.info(f"LLM配置加载成功: {llm_config}")
             openai_config = engine_config.get_config("llm.openai", {})
-            base_llm = ChatOpenAI(
+            base_tools = self.create_tools(session)
+
+            llm_kwargs = dict(
                 api_key=decrypt_api_key(llm_config.api_key),
                 base_url=llm_config.base_url,
                 model=llm_config.model,
@@ -74,9 +76,12 @@ class AIEngineManager:
                 max_tokens=openai_config.get("max_tokens", 1000),
                 timeout=openai_config.get("timeout", 30),
                 max_retries=openai_config.get("max_retries", 3),
-                model_kwargs={"response_format": {"type": "json_object"}},
             )
-            base_tools = self.create_tools(session)
+            # Only force JSON response when no tools are bound,
+            # since tool calling requires native format from the API
+            if not base_tools:
+                llm_kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}
+            base_llm = ChatOpenAI(**llm_kwargs)
             system_prompt = self.create_system_instruction()
             
             # 创建引擎
@@ -92,9 +97,24 @@ class AIEngineManager:
             logging.error(f"ChatOpenAI 初始化失败: {e}")
             return None
 
-    def create_tools(self, session: DBSession) -> List[Tool]:
+    def create_tools(self, session: DBSession) -> List[BaseTool]:
         """创建会话特定的工具"""
-        return []
+        tools: List[BaseTool] = []
+
+        # Add phone control tools if session has a device configured
+        if session.device_ip and session.device_port:
+            try:
+                from backend.engine.phone_tools import create_phone_tools
+                phone_tools = create_phone_tools(
+                    device_ip=session.device_ip,
+                    device_port=int(session.device_port),
+                )
+                tools.extend(phone_tools)
+                logging.info(f"Created {len(phone_tools)} phone control tools for session {session.id}")
+            except Exception as e:
+                logging.error(f"Failed to create phone control tools: {e}")
+
+        return tools
 
     def create_system_instruction(self) -> str:
         """构建会话特定的系统提示词"""

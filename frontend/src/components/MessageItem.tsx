@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Message } from '../types/chat';
+import ToolCallCard from './ToolCallCard';
 
 interface MessageItemProps {
   message: Message;
@@ -76,11 +77,24 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
             </button>
           )}
         </div>
-        {message.metadata && Object.keys(message.metadata).length > 0 && (
-          <div className="mt-1 text-xs text-gray-500">
-            {message.metadata.tool && (
-              <span>Tool: {message.metadata.tool}</span>
-            )}
+        {!isUser && !message.content && !message.metadata?.tool_calls && (
+          <div className="flex items-center gap-2 text-gray-500 mt-1 text-xs">
+            <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+            Thinking...
+          </div>
+        )}
+        {message.metadata?.tool_calls && message.metadata.tool_calls.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {message.metadata.tool_calls.map((tc: any, idx: number) => (
+              <ToolCallCard
+                key={tc.id || idx}
+                name={tc.name}
+                args={tc.args}
+                result={tc.result}
+                status={tc.status || 'completed'}
+                isLatest={idx === message.metadata.tool_calls.length - 1}
+              />
+            ))}
           </div>
         )}
       </div>

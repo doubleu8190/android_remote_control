@@ -9,7 +9,8 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.messages import SystemMessage, ToolMessage
 from ..infra.session_history_manager import session_history_manager
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Generator
+import json
 import logging
 
 
@@ -124,3 +125,67 @@ class AIEngine:
                 return f"工具调用对话处理失败：{str(e)}"
 
         return response.content
+
+    def chat_stream(self, user_input: str) -> Generator[dict, None, None]:
+        """
+        Process user input and yield streaming events for real-time frontend updates.
+
+        Yields dicts with keys:
+            type: 'tool_call' | 'tool_result' | 'text' | 'error' | 'done'
+            data: str (JSON-encoded for tool events)
+            message_id: str (tool call ID, for matching calls to results)
+        """
+        self.initialize()
+        history = session_history_manager.get_session_history(self.session_id)
+
+        try:
+            response = self.conversation.invoke({"input": user_input}, config=self.config)
+        except Exception as e:
+            yield {"type": "error", "data": str(e)}
+            return
+
+        max_iterations = 10
+        iteration = 0
+
+        while response.tool_calls and iteration < max_iterations:
+            iteration += 1
+
+            # Yield tool call events before executing
+            for tc in response.tool_calls:
+                yield {
+                    "type": "tool_call",
+                    "data": json.dumps({"name": tc["name"], "args": tc["args"]}),
+                    "message_id": tc.get("id", ""),
+                }
+
+            # Execute tools and yield results
+            for tc in response.tool_calls:
+                try:
+                    tool_msg = self.call_tool(tc)
+                    yield {
+                        "type": "tool_result",
+                        "data": tool_msg.content,
+                        "message_id": tc.get("id", ""),
+                    }
+                    if history:
+                        history.add_message(tool_msg)
+                except Exception as e:
+                    yield {
+                        "type": "tool_result",
+                        "data": json.dumps({"error": str(e)}),
+                        "message_id": tc.get("id", ""),
+                    }
+
+            # Re-invoke the model with tool results
+            try:
+                response = self.conversation.invoke(
+                    {"input": ""},
+                    config=self.config,
+                )
+            except Exception as e:
+                yield {"type": "error", "data": str(e)}
+                return
+
+        # Yield the final text response
+        yield {"type": "text", "data": response.content}
+        yield {"type": "done", "data": ""}

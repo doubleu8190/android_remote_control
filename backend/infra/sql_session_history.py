@@ -34,15 +34,24 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
     def convert_db_message_to_langchain(self, db_message: DBMessage) -> BaseMessage:
         role = db_message.role.lower()
         content = db_message.content
+        metadata = db_message.message_metadata or {}
 
         if role == MessageRole.USER.value:
             return HumanMessage(content=content)
         elif role == MessageRole.ASSISTANT.value:
-            return AIMessage(content=content)
+            msg = AIMessage(content=content)
+            # Restore tool_calls from metadata so the tool-calling loop can match call IDs
+            if "tool_calls" in metadata:
+                msg.tool_calls = metadata["tool_calls"]
+            return msg
         elif role == MessageRole.SYSTEM.value:
             return SystemMessage(content=content)
         elif role == MessageRole.TOOL.value:
-            return ToolMessage(content=content, tool_call_id="")
+            return ToolMessage(
+                content=content,
+                tool_call_id=metadata.get("tool_call_id", ""),
+                name=metadata.get("tool_name", ""),
+            )
         else:
             return HumanMessage(content=content)
 
@@ -60,8 +69,13 @@ class SQLAlchemyMessageHistory(BaseChatMessageHistory):
     def add_message(self, message: BaseMessage) -> None:  # 2️⃣ 核心接口：添加单条消息
         """向数据库中添加一条新消息。"""
         metadata = None
-        if isinstance(message, ToolMessage) and message.name:
-            metadata = {"tool_name": message.name}
+        if isinstance(message, ToolMessage):
+            metadata = {
+                "tool_call_id": message.tool_call_id,
+                "tool_name": message.name,
+            }
+        elif isinstance(message, AIMessage) and message.tool_calls:
+            metadata = {"tool_calls": message.tool_calls}
 
         db_message = DBMessage(
             session_id=self.session_id,

@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ChatContainer from './ChatContainer';
 import AdbScreenCast from './AdbScreenCast';
-import { Message, MessageRole } from '../types/chat';
+import { Message, MessageRole, StreamChunk } from '../types/chat';
 import { chatApiService } from '../services/api';
 
 const SessionDetailPage: React.FC = () => {
@@ -30,14 +30,16 @@ const SessionDetailPage: React.FC = () => {
       
       if (result.success && result.data) {
         const messageList = Array.isArray(result.data) ? result.data : [result.data];
-        const convertedMessages: Message[] = messageList.map(msg => ({
-          id: msg.id,
-          content: msg.content,
-          role: msg.role as MessageRole,
-          timestamp: new Date(msg.timestamp),
-          status: 'delivered',
-          metadata: msg.metadata,
-        }));
+        const convertedMessages: Message[] = messageList
+          .filter(msg => msg.role !== 'tool') // Filter out tool messages (embedded in assistant metadata)
+          .map(msg => ({
+            id: msg.id,
+            content: msg.content,
+            role: msg.role as MessageRole,
+            timestamp: new Date(msg.timestamp),
+            status: 'delivered',
+            metadata: msg.metadata,
+          }));
         setMessages(convertedMessages);
       } else {
         setMessageError(result.error || 'Failed to load messages');
@@ -57,41 +59,84 @@ const SessionDetailPage: React.FC = () => {
 
   const handleSendMessage = async (content: string) => {
     if (!sessionId) return;
-    
-    try {
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        content,
-        role: 'user' as MessageRole,
-        timestamp: new Date(),
-        status: 'sending',
-      };
-      setMessages(prev => [...prev, userMessage]);
-      
-      const result = await chatApiService.sendMessage({
-        session_id: sessionId,
-        message: content,
-        stream: false,
-      });
-      
-      if (result.success && result.data) {
-        const aiMessage: Message = {
-          id: result.data.messageId || `ai-${Date.now()}`,
-          content: result.data.content,
-          role: result.data.role as MessageRole,
-          timestamp: new Date(result.data.timestamp),
-          status: 'delivered',
-        };
-        setMessages(prev => [...prev, aiMessage]);
-      } else {
-        setMessageError(result.error || 'Failed to send message');
-        setMessages(prev => prev.map(msg => 
-          msg.id === userMessage.id ? { ...msg, status: 'error' } : msg
-        ));
-      }
-    } catch (error) {
-      setMessageError(error instanceof Error ? error.message : 'Send message error');
-    }
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content,
+      role: 'user' as MessageRole,
+      timestamp: new Date(),
+      status: 'sending',
+    };
+    const aiMessageId = `ai-${Date.now()}`;
+    const aiMessage: Message = {
+      id: aiMessageId,
+      content: '',
+      role: 'assistant' as MessageRole,
+      timestamp: new Date(),
+      status: 'sending',
+      metadata: { tool_calls: [] },
+    };
+
+    setMessages(prev => [...prev, userMessage, aiMessage]);
+
+    // Use streaming to show tool calls in real-time
+    await chatApiService.sendMessageStream(
+      { session_id: sessionId, message: content },
+      (chunk: StreamChunk) => {
+        if (chunk.type === 'tool_call') {
+          const tc = JSON.parse(chunk.data);
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === aiMessageId && msg.metadata) {
+              return {
+                ...msg,
+                metadata: {
+                  ...msg.metadata,
+                  tool_calls: [
+                    ...(msg.metadata.tool_calls || []),
+                    { ...tc, id: chunk.messageId, status: 'running' },
+                  ],
+                },
+              };
+            }
+            return msg;
+          }));
+        } else if (chunk.type === 'tool_result') {
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === aiMessageId && msg.metadata?.tool_calls) {
+              const updatedCalls = msg.metadata.tool_calls.map((tc: any) => {
+                if (tc.id === chunk.messageId) {
+                  return { ...tc, result: chunk.data, status: 'completed' };
+                }
+                return tc;
+              });
+              return { ...msg, metadata: { ...msg.metadata, tool_calls: updatedCalls } };
+            }
+            return msg;
+          }));
+        } else if (chunk.type === 'text') {
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === aiMessageId) {
+              return { ...msg, content: chunk.data, status: 'delivered' };
+            }
+            return msg;
+          }));
+        } else if (chunk.type === 'error') {
+          setMessageError(chunk.data);
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === aiMessageId) return { ...msg, status: 'error' };
+            if (msg.id === userMessage.id) return { ...msg, status: 'sent' };
+            return msg;
+          }));
+        } else if (chunk.type === 'done') {
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === aiMessageId) return { ...msg, status: 'delivered' };
+            if (msg.id === userMessage.id) return { ...msg, status: 'sent' };
+            return msg;
+          }));
+        }
+      },
+      (error) => setMessageError(error),
+    );
   };
 
   return (
